@@ -1,161 +1,223 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+const BETA_USER_KEY = "wayfinder_beta_user_id";
 
-const MOCK_TRIPS = [
-  {
-    id: "tokyo-spring",
-    title: "Tokyo in spring",
-    destination: "Tokyo, Japan",
-    dates: "Apr 18-27, 2027",
-    status: "Planning",
-    progress: 72,
-    budget: "$4,820",
-    places: 28,
-    travelers: 2,
-    next: "Book Shinkansen seats",
-    accent: "blue",
-  },
-  {
-    id: "lisbon-week",
-    title: "Lisbon food week",
-    destination: "Lisbon, Portugal",
-    dates: "Sep 5-12, 2026",
-    status: "Ready",
-    progress: 94,
-    budget: "$2,340",
-    places: 19,
-    travelers: 1,
-    next: "Share final itinerary",
-    accent: "green",
-  },
-  {
-    id: "patagonia-basecamp",
-    title: "Patagonia basecamp",
-    destination: "Chile",
-    dates: "Nov 8-20, 2026",
-    status: "Draft",
-    progress: 31,
-    budget: "$6,100",
-    places: 11,
-    travelers: 3,
-    next: "Compare flight routes",
-    accent: "amber",
-  },
-];
+const WORKFLOWS = ["Optimize itinerary", "Find alternatives", "Budget audit", "Booking readiness"];
+const PLACE_STATUSES = ["suggested", "interested", "booked", "skipped"];
 
-const ITINERARY_DAYS = [
-  {
-    day: 1,
-    date: "Sat, Apr 18",
-    area: "Arrival and Shibuya",
-    note: "Easy pace after a long flight",
-    items: [
-      { time: "15:30", title: "Arrive at Haneda", meta: "Terminal 3 · 35 min transfer", type: "Transit", state: "Booked" },
-      { time: "17:00", title: "Check in at Trunk Hotel", meta: "Cat Street · confirmation saved", type: "Stay", state: "Booked" },
-      { time: "19:30", title: "Dinner at Uobei Shibuya", meta: "$ · 8 min walk · no booking", type: "Food", state: "Suggested" },
-    ],
-  },
-  {
-    day: 2,
-    date: "Sun, Apr 19",
-    area: "Meiji and Harajuku",
-    note: "Architecture, gardens, and design",
-    items: [
-      { time: "08:30", title: "Meiji Jingu morning walk", meta: "Quietest before 10 · 75 min", type: "Place", state: "Interested" },
-      { time: "11:00", title: "Nezu Museum and garden", meta: "$12 · timed entry recommended", type: "Culture", state: "Suggested" },
-      { time: "14:30", title: "Koffee Mameya", meta: "$$ · Omotesando · 25 min", type: "Food", state: "Interested" },
-    ],
-  },
-  {
-    day: 3,
-    date: "Mon, Apr 20",
-    area: "Tsukiji and Ginza",
-    note: "Early start, polished afternoon",
-    items: [
-      { time: "07:15", title: "Tsukiji outer market", meta: "$$ · breakfast crawl · 2 hrs", type: "Food", state: "Interested" },
-      { time: "11:30", title: "Hamarikyu Gardens", meta: "$3 · tea house stop", type: "Place", state: "Suggested" },
-      { time: "18:30", title: "Sushi Ishiyama", meta: "$$$$ · deposit paid", type: "Food", state: "Booked" },
-    ],
-  },
-];
-
-const PLACES = [
-  { name: "Meiji Jingu", kind: "Culture", detail: "Ancient forest shrine", status: "Interested" },
-  { name: "Nezu Museum", kind: "Museum", detail: "Art and garden", status: "Suggested" },
-  { name: "Tsukiji Market", kind: "Food", detail: "Morning market crawl", status: "Interested" },
-  { name: "Yanaka Ginza", kind: "Walk", detail: "Old Tokyo streets", status: "Suggested" },
-  { name: "Sushi Ishiyama", kind: "Dinner", detail: "Reservation deposit paid", status: "Booked" },
-];
-
-const TASKS = [
-  { title: "Reserve Sushi Ishiyama", due: "Due Feb 18", priority: "High", completed: false },
-  { title: "Buy Ghibli Museum tickets", due: "Due Mar 10", priority: "High", completed: false },
-  { title: "Choose Hakone ryokan", due: "Before departure", priority: "Medium", completed: false },
-  { title: "Activate eSIM", due: "Before departure", priority: "Low", completed: true },
-];
-
-const ACTIVITIES = [
+const FALLBACK_ACTIVITIES = [
   {
     workflow: "Itinerary Optimizer completed",
     detail: "Reduced transit by 48 minutes across days 2-4.",
-    time: "12 min ago",
+    time: "Recently",
     status: "Complete",
   },
   {
     workflow: "Restaurant Scout needs review",
-    detail: "Found 6 dinner options matching your budget.",
-    time: "Yesterday",
+    detail: "Found dinner options matching the saved trip context.",
+    time: "Saved",
     status: "Review",
   },
   {
     workflow: "Booking Monitor is watching",
-    detail: "Sushi Ishiyama reservation window opens Feb 18.",
-    time: "2 days ago",
+    detail: "Lightweight agent events will become durable in a later release.",
+    time: "Beta",
     status: "Active",
   },
 ];
 
-const WORKFLOWS = ["Optimize itinerary", "Find alternatives", "Budget audit", "Booking readiness"];
+async function api(path, options = {}) {
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Request failed: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+function formatDateRange(trip) {
+  if (!trip.start_date && !trip.end_date) return "Dates not set";
+  if (trip.start_date && trip.end_date) return `${formatDate(trip.start_date)}-${formatDate(trip.end_date)}`;
+  return formatDate(trip.start_date || trip.end_date);
+}
+
+function formatDate(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(
+    new Date(`${value}T00:00:00`),
+  );
+}
+
+function formatDayDate(value) {
+  if (!value) return "Date not set";
+  return new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(
+    new Date(`${value}T00:00:00`),
+  );
+}
+
+function formatTime(value) {
+  if (!value) return "TBD";
+  return value.slice(0, 5);
+}
+
+function formatBudget(value) {
+  if (value === null || value === undefined) return "Budget TBD";
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Number(value));
+}
+
+function formatStatus(value) {
+  if (!value) return "";
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
 
 export default function App() {
-  const [view, setView] = useState("dashboard");
-  const [selectedTripId, setSelectedTripId] = useState(MOCK_TRIPS[0].id);
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState("access");
+  const [trips, setTrips] = useState([]);
+  const [selectedTrip, setSelectedTrip] = useState(null);
   const [activePanel, setActivePanel] = useState("places");
   const [chatInput, setChatInput] = useState("");
-  const [messages, setMessages] = useState([
-    {
-      role: "assistant",
-      text: "I can help shape this trip workspace. Ask me to adjust the itinerary, compare neighborhoods, audit budget, or find alternatives.",
-    },
-  ]);
+  const [messages, setMessages] = useState([]);
+  const [itineraryDays, setItineraryDays] = useState([]);
+  const [tripPlaces, setTripPlaces] = useState([]);
   const [streaming, setStreaming] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const selectedTrip = useMemo(
-    () => MOCK_TRIPS.find((trip) => trip.id === selectedTripId) || MOCK_TRIPS[0],
-    [selectedTripId],
-  );
+  const selectedTripId = selectedTrip?.id;
+
+  const loadTrips = useCallback(async () => {
+    const data = await api("/trips");
+    setTrips(data);
+    return data;
+  }, []);
+
+  const loadWorkspace = useCallback(async (tripId) => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const [trip, savedMessages, itinerary, places] = await Promise.all([
+        api(`/trips/${tripId}`),
+        api(`/trips/${tripId}/messages`),
+        api(`/trips/${tripId}/itinerary`),
+        api(`/trips/${tripId}/places`),
+      ]);
+
+      setSelectedTrip(trip);
+      setMessages(savedMessages.map((message) => ({ ...message, text: message.content })));
+      setItineraryDays(itinerary);
+      setTripPlaces(places);
+      setView("workspace");
+    } catch (err) {
+      setError("Could not load this trip workspace.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!localStorage.getItem(BETA_USER_KEY)) return;
+
+    let cancelled = false;
+    async function restoreSession() {
+      setLoading(true);
+      try {
+        const session = await api("/dev/session");
+        if (cancelled) return;
+
+        setUser(session);
+        await loadTrips();
+        if (!cancelled) setView("dashboard");
+      } catch (err) {
+        localStorage.removeItem(BETA_USER_KEY);
+        if (!cancelled) setView("access");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadTrips]);
+
+  async function continueAsBetaTester() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const betaUser = await api("/dev/login", { method: "POST" });
+      localStorage.setItem(BETA_USER_KEY, betaUser.id);
+      setUser(betaUser);
+      await loadTrips();
+      setView("dashboard");
+    } catch (err) {
+      setError("Could not enter the shared beta workspace.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createTrip() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const trip = await api("/trips", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Untitled trip",
+          destination: "New destination",
+          status: "Draft",
+          progress: 0,
+        }),
+      });
+      await loadTrips();
+      await loadWorkspace(trip.id);
+    } catch (err) {
+      setError("Could not create a trip.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function sendChatMessage(e) {
     e.preventDefault();
 
     const text = chatInput.trim();
-    if (!text || streaming) return;
+    if (!text || streaming || !selectedTripId) return;
 
     setChatInput("");
     setError("");
     setStreaming(true);
 
-    const assistantIndex = messages.length + 1;
+    const optimisticUser = { role: "user", text, content: text };
+    const assistantDraft = { role: "assistant", text: "", content: "" };
 
-    setMessages((current) => [
-      ...current,
-      { role: "user", text },
-      { role: "assistant", text: "" },
-    ]);
+    setMessages((current) => [...current, optimisticUser, assistantDraft]);
+
+    let assistantText = "";
 
     try {
+      await api(`/trips/${selectedTripId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ role: "user", content: text }),
+      });
+
       const res = await fetch(`${API_URL}/travel-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -184,11 +246,10 @@ export default function App() {
           const event = JSON.parse(line);
 
           if (event.type === "delta") {
+            assistantText += event.text;
             setMessages((current) =>
               current.map((message, index) =>
-                index === assistantIndex
-                  ? { ...message, text: message.text + event.text }
-                  : message,
+                index === current.length - 1 ? { ...message, text: assistantText, content: assistantText } : message,
               ),
             );
           }
@@ -198,66 +259,165 @@ export default function App() {
           }
         }
       }
-    } catch (error) {
+
+      if (assistantText.trim()) {
+        const savedAssistant = await api(`/trips/${selectedTripId}/messages`, {
+          method: "POST",
+          body: JSON.stringify({ role: "assistant", content: assistantText }),
+        });
+
+        setMessages((current) =>
+          current.map((message, index) =>
+            index === current.length - 1 ? { ...savedAssistant, text: savedAssistant.content } : message,
+          ),
+        );
+      }
+    } catch (err) {
       setError("Something went wrong. Please try again.");
     } finally {
       setStreaming(false);
     }
   }
 
+  async function updateItineraryItem(itemId, patch) {
+    const previous = itineraryDays;
+    setItineraryDays((days) =>
+      days.map((day) => ({
+        ...day,
+        items: day.items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)),
+      })),
+    );
+
+    try {
+      const updated = await api(`/itinerary-items/${itemId}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+
+      setItineraryDays((days) =>
+        days.map((day) => ({
+          ...day,
+          items: day.items.map((item) => (item.id === itemId ? updated : item)),
+        })),
+      );
+    } catch (err) {
+      setItineraryDays(previous);
+      setError("Could not save itinerary change.");
+    }
+  }
+
+  async function updateTripPlace(tripPlaceId, patch) {
+    const previous = tripPlaces;
+    setTripPlaces((places) => places.map((place) => (place.id === tripPlaceId ? { ...place, ...patch } : place)));
+
+    try {
+      const updated = await api(`/trip-places/${tripPlaceId}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      setTripPlaces((places) => places.map((place) => (place.id === tripPlaceId ? updated : place)));
+    } catch (err) {
+      setTripPlaces(previous);
+      setError("Could not save place status.");
+    }
+  }
+
+  if (view === "access") {
+    return (
+      <main className="app">
+        <AccessScreen loading={loading} error={error} onContinue={continueAsBetaTester} />
+      </main>
+    );
+  }
+
   return (
     <main className="app">
       {view === "dashboard" ? (
         <TripsDashboard
-          trips={MOCK_TRIPS}
-          onOpenTrip={(tripId) => {
-            setSelectedTripId(tripId);
-            setView("workspace");
-          }}
+          trips={trips}
+          user={user}
+          loading={loading}
+          error={error}
+          onCreateTrip={createTrip}
+          onOpenTrip={loadWorkspace}
         />
       ) : (
         <TripWorkspace
           trip={selectedTrip}
+          itineraryDays={itineraryDays}
+          tripPlaces={tripPlaces}
           activePanel={activePanel}
           setActivePanel={setActivePanel}
           messages={messages}
           chatInput={chatInput}
           setChatInput={setChatInput}
           streaming={streaming}
+          loading={loading}
           error={error}
           onSendMessage={sendChatMessage}
-          onBack={() => setView("dashboard")}
+          onUpdateItineraryItem={updateItineraryItem}
+          onUpdateTripPlace={updateTripPlace}
+          onBack={async () => {
+            await loadTrips();
+            setView("dashboard");
+          }}
         />
       )}
     </main>
   );
 }
 
-function TripsDashboard({ trips, onOpenTrip }) {
+function AccessScreen({ loading, error, onContinue }) {
+  return (
+    <section className="access-screen" aria-label="Wayfinder OS beta access">
+      <div className="access-card">
+        <AppHeader />
+        <p className="eyebrow">Shared beta workspace</p>
+        <h1>Continue into durable trip state.</h1>
+        <p className="hero-copy">
+          This beta uses one shared tester account. Trips, chat messages, itinerary changes, and place statuses are saved
+          to the same workspace for everyone using this build.
+        </p>
+        {error && <p className="error">{error}</p>}
+        <button className="primary-action" type="button" onClick={onContinue} disabled={loading}>
+          {loading ? "Opening workspace..." : "Continue as beta tester"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip }) {
+  const activeBudget = useMemo(
+    () => trips.reduce((sum, trip) => sum + Number(trip.budget_amount || 0), 0),
+    [trips],
+  );
+
   return (
     <section className="dashboard" aria-label="Wayfinder OS trips dashboard">
-      <AppHeader />
+      <AppHeader user={user} />
 
       <div className="dashboard-hero">
         <div>
           <p className="eyebrow">Trip control center</p>
           <h1>Plan, shape, and track every trip in one workspace.</h1>
           <p className="hero-copy">
-            Wayfinder OS v0.1 introduces durable-looking trip artifacts while the
-            underlying data stays local and lightweight.
+            Wayfinder OS v0.2 saves shared beta trips, chat messages, itinerary state, and place decisions to Postgres.
           </p>
         </div>
-        <button className="primary-action" type="button" onClick={() => onOpenTrip(trips[0].id)}>
+        <button className="primary-action" type="button" onClick={onCreateTrip} disabled={loading}>
           <span aria-hidden="true">+</span>
           Plan a new trip
         </button>
       </div>
 
+      {error && <p className="error dashboard-error">{error}</p>}
+
       <section className="metric-grid" aria-label="Account usage summary">
-        <MetricCard label="Mock plan" value="Pro preview" detail="No billing connected" />
-        <MetricCard label="Credits" value="68" detail="32 used this cycle" progress={68} />
-        <MetricCard label="Agent runs" value="7" detail="2 need review" />
-        <MetricCard label="Active budget" value="$13,260" detail="Across mock trips" />
+        <MetricCard label="Workspace" value="Shared beta" detail="No private accounts yet" />
+        <MetricCard label="Durable trips" value={trips.length} detail="Loaded from PostgreSQL" />
+        <MetricCard label="Agent runs" value="Beta" detail="Lightweight events only" />
+        <MetricCard label="Active budget" value={formatBudget(activeBudget)} detail="Across saved trips" />
       </section>
 
       <section className="dashboard-grid">
@@ -265,19 +425,14 @@ function TripsDashboard({ trips, onOpenTrip }) {
           <div className="section-heading">
             <div>
               <h2>Your trips</h2>
-              <p>Plans, readiness, places, and next actions.</p>
+              <p>Plans, readiness, places, and next actions from the backend.</p>
             </div>
           </div>
 
           <div className="trip-list">
-            {trips.map((trip) => (
-              <button
-                className="trip-row"
-                key={trip.id}
-                type="button"
-                onClick={() => onOpenTrip(trip.id)}
-              >
-                <span className={`trip-marker ${trip.accent}`} aria-hidden="true">
+            {trips.map((trip, index) => (
+              <button className="trip-row" key={trip.id} type="button" onClick={() => onOpenTrip(trip.id)}>
+                <span className={`trip-marker ${index % 2 === 0 ? "blue" : "green"}`} aria-hidden="true">
                   {trip.destination.slice(0, 1)}
                 </span>
                 <span className="trip-main">
@@ -285,8 +440,10 @@ function TripsDashboard({ trips, onOpenTrip }) {
                     <strong>{trip.title}</strong>
                     <StatusPill>{trip.status}</StatusPill>
                   </span>
-                  <span>{trip.destination} · {trip.dates}</span>
-                  <span className="next-action">Next: {trip.next}</span>
+                  <span>
+                    {trip.destination} · {formatDateRange(trip)}
+                  </span>
+                  <span className="next-action">Saved: {formatDate(trip.updated_at.slice(0, 10))}</span>
                 </span>
                 <span className="trip-readiness">
                   <span>
@@ -296,11 +453,18 @@ function TripsDashboard({ trips, onOpenTrip }) {
                   <ProgressBar value={trip.progress} />
                 </span>
                 <span className="trip-stats">
-                  <strong>{trip.budget}</strong>
-                  <span>{trip.places} places · {trip.travelers} travelers</span>
+                  <strong>{formatBudget(trip.budget_amount)}</strong>
+                  <span>Shared beta workspace</span>
                 </span>
               </button>
             ))}
+
+            {!trips.length && (
+              <div className="empty-state">
+                <strong>No trips yet</strong>
+                <p>Create the first durable trip for this shared beta workspace.</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -308,9 +472,9 @@ function TripsDashboard({ trips, onOpenTrip }) {
           <AgentActivityFeed />
           <div className="agent-callout">
             <p className="eyebrow">Suggested next</p>
-            <h2>Resolve Tokyo booking gaps</h2>
-            <p>Three time-sensitive reservations open within the next 14 days.</p>
-            <button type="button" onClick={() => onOpenTrip("tokyo-spring")}>
+            <h2>Open a saved trip</h2>
+            <p>Chat, itinerary toggles, and place status changes now survive refreshes.</p>
+            <button type="button" onClick={() => trips[0] && onOpenTrip(trips[0].id)} disabled={!trips.length}>
               Review workspace
             </button>
           </div>
@@ -322,16 +486,23 @@ function TripsDashboard({ trips, onOpenTrip }) {
 
 function TripWorkspace({
   trip,
+  itineraryDays,
+  tripPlaces,
   activePanel,
   setActivePanel,
   messages,
   chatInput,
   setChatInput,
   streaming,
+  loading,
   error,
   onSendMessage,
+  onUpdateItineraryItem,
+  onUpdateTripPlace,
   onBack,
 }) {
+  if (!trip) return null;
+
   return (
     <section className="workspace-view" aria-label={`${trip.title} workspace`}>
       <header className="workspace-header">
@@ -344,14 +515,20 @@ function TripWorkspace({
               <h1>{trip.title}</h1>
               <StatusPill>{trip.status}</StatusPill>
             </div>
-            <p>{trip.dates} · {trip.destination} · last saved locally</p>
+            <p>
+              {formatDateRange(trip)} · {trip.destination} · saved to shared beta workspace
+            </p>
           </div>
         </div>
         <div className="workspace-actions">
-          <span className="credits-pill">68 credits</span>
-          <button className="secondary-action" type="button">Share preview</button>
+          <span className="credits-pill">Shared beta</span>
+          <button className="secondary-action" type="button" disabled>
+            Share preview
+          </button>
         </div>
       </header>
+
+      {error && <p className="error workspace-error">{error}</p>}
 
       <div className="workspace-grid">
         <ChatPanel
@@ -359,19 +536,29 @@ function TripWorkspace({
           chatInput={chatInput}
           setChatInput={setChatInput}
           streaming={streaming}
-          error={error}
+          error=""
           onSendMessage={onSendMessage}
         />
 
-        <ItineraryTimeline trip={trip} />
+        <ItineraryTimeline
+          trip={trip}
+          itineraryDays={itineraryDays}
+          loading={loading}
+          onUpdateItineraryItem={onUpdateItineraryItem}
+        />
 
-        <ArtifactPanel activePanel={activePanel} setActivePanel={setActivePanel} />
+        <ArtifactPanel
+          activePanel={activePanel}
+          setActivePanel={setActivePanel}
+          tripPlaces={tripPlaces}
+          onUpdateTripPlace={onUpdateTripPlace}
+        />
       </div>
     </section>
   );
 }
 
-function AppHeader() {
+function AppHeader({ user }) {
   return (
     <header className="app-header">
       <div className="brand-lockup" aria-label="Wayfinder OS">
@@ -381,7 +568,10 @@ function AppHeader() {
           <p className="brand-subtitle">OS</p>
         </div>
       </div>
-      <span className="version-badge">v0.1</span>
+      <div className="header-meta">
+        {user && <span className="version-badge">{user.display_name}</span>}
+        <span className="version-badge">v0.2</span>
+      </div>
     </header>
   );
 }
@@ -392,14 +582,14 @@ function ChatPanel({ messages, chatInput, setChatInput, streaming, error, onSend
       <div className="panel-header">
         <div>
           <h2>Planning assistant</h2>
-          <p>Streaming from the existing travel endpoint.</p>
+          <p>Streaming remains live; final messages are saved to this trip.</p>
         </div>
         {streaming && <span className="streaming-pill">Streaming</span>}
       </div>
 
       <div className="message-list" aria-live="polite">
         {messages.map((message, index) => (
-          <div className={`message ${message.role}`} key={`${message.role}-${index}`}>
+          <div className={`message ${message.role}`} key={message.id || `${message.role}-${index}`}>
             <span>{message.role === "user" ? "You" : "Wayfinder"}</span>
             <p>{message.text || "Preparing the first notes..."}</p>
           </div>
@@ -415,7 +605,7 @@ function ChatPanel({ messages, chatInput, setChatInput, streaming, error, onSend
           disabled={streaming}
         />
         <div className="composer-row">
-          <p>Travel planning only in this release.</p>
+          <p>Saved in this shared beta trip after the stream finishes.</p>
           <button className="primary-action compact" type="submit" disabled={streaming || !chatInput.trim()}>
             {streaming ? "Planning..." : "Send"}
           </button>
@@ -425,15 +615,19 @@ function ChatPanel({ messages, chatInput, setChatInput, streaming, error, onSend
   );
 }
 
-function ItineraryTimeline({ trip }) {
+function ItineraryTimeline({ trip, itineraryDays, loading, onUpdateItineraryItem }) {
   return (
     <section className="itinerary-panel">
       <div className="panel-header sticky-panel-header">
         <div>
           <h2>Itinerary</h2>
-          <p>{trip.progress}% ready · balanced pace · mock artifact</p>
+          <p>
+            {trip.progress}% ready · {itineraryDays.length} saved days · item toggles persist
+          </p>
         </div>
-        <button className="secondary-action" type="button">Apr 18-27</button>
+        <button className="secondary-action" type="button" disabled>
+          {formatDateRange(trip)}
+        </button>
       </div>
 
       <div className="workflow-strip" aria-label="Agent workflow concepts">
@@ -445,58 +639,81 @@ function ItineraryTimeline({ trip }) {
       </div>
 
       <div className="timeline">
-        {ITINERARY_DAYS.map((day) => (
-          <article className="day-card" key={day.day}>
+        {itineraryDays.map((day) => (
+          <article className="day-card" key={day.id}>
             <header>
               <span className="day-number">
                 <small>Day</small>
-                <strong>{day.day}</strong>
+                <strong>{day.day_number}</strong>
               </span>
               <div>
-                <h3>{day.area}</h3>
-                <p>{day.date} · {day.note}</p>
+                <h3>{day.title || `Day ${day.day_number}`}</h3>
+                <p>
+                  {formatDayDate(day.date)} · {day.summary || "No summary yet"}
+                </p>
               </div>
-              <StatusPill>Easy pace</StatusPill>
+              <StatusPill>{day.items.length} items</StatusPill>
             </header>
             <div className="timeline-items">
               {day.items.map((item) => (
-                <div className="timeline-item" key={`${day.day}-${item.title}`}>
-                  <time>{item.time}</time>
-                  <span className="type-chip">{item.type}</span>
+                <div className="timeline-item" key={item.id}>
+                  <time>{formatTime(item.start_time)}</time>
+                  <span className="type-chip">{item.category || "Plan"}</span>
                   <div>
                     <strong>{item.title}</strong>
-                    <p>{item.meta}</p>
+                    <p>{item.description || "No notes yet"}</p>
                   </div>
-                  <StatusPill>{item.state}</StatusPill>
+                  <div className="item-toggles">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={item.is_locked}
+                        disabled={loading}
+                        onChange={(e) => onUpdateItineraryItem(item.id, { is_locked: e.target.checked })}
+                      />
+                      Locked
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={item.is_booked}
+                        disabled={loading}
+                        onChange={(e) => onUpdateItineraryItem(item.id, { is_booked: e.target.checked })}
+                      />
+                      Booked
+                    </label>
+                  </div>
                 </div>
               ))}
             </div>
           </article>
         ))}
+
+        {!itineraryDays.length && (
+          <div className="empty-state">
+            <strong>No itinerary yet</strong>
+            <p>Add days through the API or seed data, then this workspace will render them here.</p>
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function ArtifactPanel({ activePanel, setActivePanel }) {
+function ArtifactPanel({ activePanel, setActivePanel, tripPlaces, onUpdateTripPlace }) {
   const tabs = ["places", "budget", "tasks", "activity"];
 
   return (
     <aside className="artifact-panel">
       <div className="tabs" role="tablist" aria-label="Trip artifact panels">
         {tabs.map((tab) => (
-          <button
-            className={activePanel === tab ? "active" : ""}
-            type="button"
-            key={tab}
-            onClick={() => setActivePanel(tab)}
-          >
+          <button className={activePanel === tab ? "active" : ""} type="button" key={tab} onClick={() => setActivePanel(tab)}>
             {tab}
           </button>
         ))}
       </div>
 
-      {activePanel === "places" && <PlacesPanel />}
+      {activePanel === "places" && <PlacesPanel tripPlaces={tripPlaces} onUpdateTripPlace={onUpdateTripPlace} />}
       {activePanel === "budget" && <BudgetPanel />}
       {activePanel === "tasks" && <TasksPanel />}
       {activePanel === "activity" && <AgentActivityFeed />}
@@ -504,42 +721,64 @@ function ArtifactPanel({ activePanel, setActivePanel }) {
   );
 }
 
-function PlacesPanel() {
+function PlacesPanel({ tripPlaces, onUpdateTripPlace }) {
   return (
     <div className="artifact-content">
       <PanelTitle title="Place board" sub="Suggested, interested, booked, and skipped places." />
-      {PLACES.map((place, index) => (
-        <div className="place-row" key={place.name}>
+      {tripPlaces.map((tripPlace, index) => (
+        <div className="place-row" key={tripPlace.id}>
           <span>{index + 1}</span>
           <div>
-            <strong>{place.name}</strong>
-            <p>{place.kind} · {place.detail}</p>
+            <strong>{tripPlace.place.name}</strong>
+            <p>
+              {tripPlace.place.category || "Place"} · {tripPlace.notes || tripPlace.place.city || "No notes yet"}
+            </p>
           </div>
-          <StatusPill>{place.status}</StatusPill>
+          <select
+            className="status-select"
+            value={tripPlace.status}
+            onChange={(e) => onUpdateTripPlace(tripPlace.id, { status: e.target.value })}
+            aria-label={`Status for ${tripPlace.place.name}`}
+          >
+            {PLACE_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {formatStatus(status)}
+              </option>
+            ))}
+          </select>
         </div>
       ))}
+
+      {!tripPlaces.length && (
+        <div className="empty-state compact">
+          <strong>No places yet</strong>
+          <p>Add a place through the API to start the board.</p>
+        </div>
+      )}
     </div>
   );
 }
 
 function BudgetPanel() {
   const rows = [
-    ["Flights", "$1,420", "29%"],
-    ["Stays", "$1,760", "36%"],
-    ["Food", "$820", "17%"],
-    ["Transit", "$340", "7%"],
-    ["Activities", "$480", "10%"],
+    ["Flights", "TBD", "Estimate"],
+    ["Stays", "TBD", "Estimate"],
+    ["Food", "TBD", "Estimate"],
+    ["Transit", "TBD", "Estimate"],
+    ["Activities", "TBD", "Estimate"],
   ];
 
   return (
     <div className="artifact-content">
-      <PanelTitle title="$4,820 forecast" sub="$180 under your target." />
-      <ProgressBar value={76} />
+      <PanelTitle title="Budget forecast" sub="Trip-level budget persists; category detail stays lightweight for v0.2." />
+      <ProgressBar value={64} />
       <div className="budget-list">
         {rows.map(([label, value, share]) => (
           <div className="budget-row" key={label}>
             <span>{label}</span>
-            <strong>{value} <small>{share}</small></strong>
+            <strong>
+              {value} <small>{share}</small>
+            </strong>
           </div>
         ))}
       </div>
@@ -548,10 +787,16 @@ function BudgetPanel() {
 }
 
 function TasksPanel() {
+  const tasks = [
+    { title: "Review saved itinerary", due: "Shared beta", priority: "High", completed: false },
+    { title: "Confirm booked toggles", due: "After changes", priority: "Medium", completed: false },
+    { title: "Verify place statuses", due: "After refresh", priority: "Medium", completed: true },
+  ];
+
   return (
     <div className="artifact-content">
-      <PanelTitle title="Booking checklist" sub="Local task state for the workspace shell." />
-      {TASKS.map((task) => (
+      <PanelTitle title="Booking checklist" sub="Checklist persistence is modeled but not surfaced as an editor yet." />
+      {tasks.map((task) => (
         <label className="task-row" key={task.title}>
           <input type="checkbox" defaultChecked={task.completed} />
           <span>
@@ -571,10 +816,10 @@ function AgentActivityFeed() {
       <div className="section-heading compact-heading">
         <div>
           <h2>Agent activity</h2>
-          <p>Visible workflow concepts for future agent events.</p>
+          <p>Lightweight workflow concepts for future durable agent events.</p>
         </div>
       </div>
-      {ACTIVITIES.map((activity) => (
+      {FALLBACK_ACTIVITIES.map((activity) => (
         <div className="activity-row" key={activity.workflow}>
           <span className={`activity-dot ${activity.status.toLowerCase()}`} />
           <div>
