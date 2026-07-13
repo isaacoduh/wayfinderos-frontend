@@ -1,35 +1,165 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
-const STARTER_PROMPTS = [
-  "Plan a 3-day food-focused trip to Lisbon under $900.",
-  "Compare spring vs fall for a first trip to Kyoto.",
-  "Build a calm 5-day Paris itinerary with one museum per day.",
-  "What should I pack for Iceland in late September?",
+const MOCK_TRIPS = [
+  {
+    id: "tokyo-spring",
+    title: "Tokyo in spring",
+    destination: "Tokyo, Japan",
+    dates: "Apr 18-27, 2027",
+    status: "Planning",
+    progress: 72,
+    budget: "$4,820",
+    places: 28,
+    travelers: 2,
+    next: "Book Shinkansen seats",
+    accent: "blue",
+  },
+  {
+    id: "lisbon-week",
+    title: "Lisbon food week",
+    destination: "Lisbon, Portugal",
+    dates: "Sep 5-12, 2026",
+    status: "Ready",
+    progress: 94,
+    budget: "$2,340",
+    places: 19,
+    travelers: 1,
+    next: "Share final itinerary",
+    accent: "green",
+  },
+  {
+    id: "patagonia-basecamp",
+    title: "Patagonia basecamp",
+    destination: "Chile",
+    dates: "Nov 8-20, 2026",
+    status: "Draft",
+    progress: 31,
+    budget: "$6,100",
+    places: 11,
+    travelers: 3,
+    next: "Compare flight routes",
+    accent: "amber",
+  },
 ];
 
+const ITINERARY_DAYS = [
+  {
+    day: 1,
+    date: "Sat, Apr 18",
+    area: "Arrival and Shibuya",
+    note: "Easy pace after a long flight",
+    items: [
+      { time: "15:30", title: "Arrive at Haneda", meta: "Terminal 3 · 35 min transfer", type: "Transit", state: "Booked" },
+      { time: "17:00", title: "Check in at Trunk Hotel", meta: "Cat Street · confirmation saved", type: "Stay", state: "Booked" },
+      { time: "19:30", title: "Dinner at Uobei Shibuya", meta: "$ · 8 min walk · no booking", type: "Food", state: "Suggested" },
+    ],
+  },
+  {
+    day: 2,
+    date: "Sun, Apr 19",
+    area: "Meiji and Harajuku",
+    note: "Architecture, gardens, and design",
+    items: [
+      { time: "08:30", title: "Meiji Jingu morning walk", meta: "Quietest before 10 · 75 min", type: "Place", state: "Interested" },
+      { time: "11:00", title: "Nezu Museum and garden", meta: "$12 · timed entry recommended", type: "Culture", state: "Suggested" },
+      { time: "14:30", title: "Koffee Mameya", meta: "$$ · Omotesando · 25 min", type: "Food", state: "Interested" },
+    ],
+  },
+  {
+    day: 3,
+    date: "Mon, Apr 20",
+    area: "Tsukiji and Ginza",
+    note: "Early start, polished afternoon",
+    items: [
+      { time: "07:15", title: "Tsukiji outer market", meta: "$$ · breakfast crawl · 2 hrs", type: "Food", state: "Interested" },
+      { time: "11:30", title: "Hamarikyu Gardens", meta: "$3 · tea house stop", type: "Place", state: "Suggested" },
+      { time: "18:30", title: "Sushi Ishiyama", meta: "$$$$ · deposit paid", type: "Food", state: "Booked" },
+    ],
+  },
+];
+
+const PLACES = [
+  { name: "Meiji Jingu", kind: "Culture", detail: "Ancient forest shrine", status: "Interested" },
+  { name: "Nezu Museum", kind: "Museum", detail: "Art and garden", status: "Suggested" },
+  { name: "Tsukiji Market", kind: "Food", detail: "Morning market crawl", status: "Interested" },
+  { name: "Yanaka Ginza", kind: "Walk", detail: "Old Tokyo streets", status: "Suggested" },
+  { name: "Sushi Ishiyama", kind: "Dinner", detail: "Reservation deposit paid", status: "Booked" },
+];
+
+const TASKS = [
+  { title: "Reserve Sushi Ishiyama", due: "Due Feb 18", priority: "High", completed: false },
+  { title: "Buy Ghibli Museum tickets", due: "Due Mar 10", priority: "High", completed: false },
+  { title: "Choose Hakone ryokan", due: "Before departure", priority: "Medium", completed: false },
+  { title: "Activate eSIM", due: "Before departure", priority: "Low", completed: true },
+];
+
+const ACTIVITIES = [
+  {
+    workflow: "Itinerary Optimizer completed",
+    detail: "Reduced transit by 48 minutes across days 2-4.",
+    time: "12 min ago",
+    status: "Complete",
+  },
+  {
+    workflow: "Restaurant Scout needs review",
+    detail: "Found 6 dinner options matching your budget.",
+    time: "Yesterday",
+    status: "Review",
+  },
+  {
+    workflow: "Booking Monitor is watching",
+    detail: "Sushi Ishiyama reservation window opens Feb 18.",
+    time: "2 days ago",
+    status: "Active",
+  },
+];
+
+const WORKFLOWS = ["Optimize itinerary", "Find alternatives", "Budget audit", "Booking readiness"];
+
 export default function App() {
-  const [query, setQuery] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [view, setView] = useState("dashboard");
+  const [selectedTripId, setSelectedTripId] = useState(MOCK_TRIPS[0].id);
+  const [activePanel, setActivePanel] = useState("places");
+  const [chatInput, setChatInput] = useState("");
+  const [messages, setMessages] = useState([
+    {
+      role: "assistant",
+      text: "I can help shape this trip workspace. Ask me to adjust the itinerary, compare neighborhoods, audit budget, or find alternatives.",
+    },
+  ]);
+  const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState("");
 
-  async function submit(e) {
+  const selectedTrip = useMemo(
+    () => MOCK_TRIPS.find((trip) => trip.id === selectedTripId) || MOCK_TRIPS[0],
+    [selectedTripId],
+  );
+
+  async function sendChatMessage(e) {
     e.preventDefault();
 
-    const trimmedQuery = query.trim();
-    if (!trimmedQuery || loading) return;
+    const text = chatInput.trim();
+    if (!text || streaming) return;
 
-    setLoading(true);
+    setChatInput("");
     setError("");
-    setAnswer("");
+    setStreaming(true);
+
+    const assistantIndex = messages.length + 1;
+
+    setMessages((current) => [
+      ...current,
+      { role: "user", text },
+      { role: "assistant", text: "" },
+    ]);
 
     try {
       const res = await fetch(`${API_URL}/travel-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: trimmedQuery }),
+        body: JSON.stringify({ query: text }),
       });
 
       if (!res.ok || !res.body) {
@@ -54,7 +184,13 @@ export default function App() {
           const event = JSON.parse(line);
 
           if (event.type === "delta") {
-            setAnswer((current) => current + event.text);
+            setMessages((current) =>
+              current.map((message, index) =>
+                index === assistantIndex
+                  ? { ...message, text: message.text + event.text }
+                  : message,
+              ),
+            );
           }
 
           if (event.type === "error") {
@@ -65,271 +201,421 @@ export default function App() {
     } catch (error) {
       setError("Something went wrong. Please try again.");
     } finally {
-      setLoading(false);
+      setStreaming(false);
     }
   }
 
-  function useStarterPrompt(prompt) {
-    if (loading) return;
-    setQuery(prompt);
-    setError("");
-  }
-
-  const hasResult = answer || loading || error;
-
   return (
-    <main className="page">
-      <section className="workspace" aria-label="Wayfinder OS travel assistant">
-        <header className="app-header">
-          <div className="brand-lockup" aria-label="Wayfinder OS">
-            <span className="brand-mark" aria-hidden="true" />
-            <div>
-              <p className="brand-name">Wayfinder</p>
-              <p className="brand-subtitle">OS</p>
-            </div>
-          </div>
-          <span className="version-badge">v0.000001 Seed</span>
-        </header>
-
-        <section className="intro">
-          <p className="eyebrow">AI travel planning assistant</p>
-          <h1>Ask a focused travel planning question.</h1>
-          <p className="product-line">A focused travel planning assistant.</p>
-        </section>
-
-        <section className="planner-shell">
-          <form className="composer" onSubmit={submit}>
-            <label htmlFor="travel-query">Travel prompt</label>
-            <textarea
-              id="travel-query"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Plan a 3-day food-focused trip to Lisbon under $900..."
-              disabled={loading}
-            />
-
-            <div className="composer-footer">
-              <p className="scope-note">
-                Wayfinder only handles travel planning in this seed release.
-              </p>
-              <button className="ask-button" disabled={loading || !query.trim()}>
-                {loading ? "Planning..." : "Ask Wayfinder"}
-              </button>
-            </div>
-          </form>
-
-          <div className="starter-prompts" aria-label="Suggested starter prompts">
-            {STARTER_PROMPTS.map((prompt) => (
-              <button
-                className="starter-prompt"
-                key={prompt}
-                onClick={() => useStarterPrompt(prompt)}
-                disabled={loading}
-                type="button"
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className={`answer-panel ${hasResult ? "is-active" : ""}`} aria-live="polite">
-          <div className="answer-header">
-            <div>
-              <p className="answer-kicker">Wayfinder response</p>
-              <h2>{loading ? "Streaming plan" : "Answer"}</h2>
-            </div>
-            {loading && <span className="streaming-pill">Streaming</span>}
-          </div>
-
-          {error && <p className="error">{error}</p>}
-
-          {answer ? (
-            <TravelAnswer answer={answer} />
-          ) : (
-            <p className="empty-state">
-              {loading
-                ? "Preparing the first notes..."
-                : "Your streamed travel answer will appear here."}
-            </p>
-          )}
-        </section>
-      </section>
+    <main className="app">
+      {view === "dashboard" ? (
+        <TripsDashboard
+          trips={MOCK_TRIPS}
+          onOpenTrip={(tripId) => {
+            setSelectedTripId(tripId);
+            setView("workspace");
+          }}
+        />
+      ) : (
+        <TripWorkspace
+          trip={selectedTrip}
+          activePanel={activePanel}
+          setActivePanel={setActivePanel}
+          messages={messages}
+          chatInput={chatInput}
+          setChatInput={setChatInput}
+          streaming={streaming}
+          error={error}
+          onSendMessage={sendChatMessage}
+          onBack={() => setView("dashboard")}
+        />
+      )}
     </main>
   );
 }
 
-function TravelAnswer({ answer }) {
-  const sections = parseTravelAnswer(answer);
+function TripsDashboard({ trips, onOpenTrip }) {
+  return (
+    <section className="dashboard" aria-label="Wayfinder OS trips dashboard">
+      <AppHeader />
 
-  if (!sections.length) {
-    return null;
-  }
+      <div className="dashboard-hero">
+        <div>
+          <p className="eyebrow">Trip control center</p>
+          <h1>Plan, shape, and track every trip in one workspace.</h1>
+          <p className="hero-copy">
+            Wayfinder OS v0.1 introduces durable-looking trip artifacts while the
+            underlying data stays local and lightweight.
+          </p>
+        </div>
+        <button className="primary-action" type="button" onClick={() => onOpenTrip(trips[0].id)}>
+          <span aria-hidden="true">+</span>
+          Plan a new trip
+        </button>
+      </div>
+
+      <section className="metric-grid" aria-label="Account usage summary">
+        <MetricCard label="Mock plan" value="Pro preview" detail="No billing connected" />
+        <MetricCard label="Credits" value="68" detail="32 used this cycle" progress={68} />
+        <MetricCard label="Agent runs" value="7" detail="2 need review" />
+        <MetricCard label="Active budget" value="$13,260" detail="Across mock trips" />
+      </section>
+
+      <section className="dashboard-grid">
+        <div className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>Your trips</h2>
+              <p>Plans, readiness, places, and next actions.</p>
+            </div>
+          </div>
+
+          <div className="trip-list">
+            {trips.map((trip) => (
+              <button
+                className="trip-row"
+                key={trip.id}
+                type="button"
+                onClick={() => onOpenTrip(trip.id)}
+              >
+                <span className={`trip-marker ${trip.accent}`} aria-hidden="true">
+                  {trip.destination.slice(0, 1)}
+                </span>
+                <span className="trip-main">
+                  <span className="trip-title-line">
+                    <strong>{trip.title}</strong>
+                    <StatusPill>{trip.status}</StatusPill>
+                  </span>
+                  <span>{trip.destination} · {trip.dates}</span>
+                  <span className="next-action">Next: {trip.next}</span>
+                </span>
+                <span className="trip-readiness">
+                  <span>
+                    <span>Trip readiness</span>
+                    <strong>{trip.progress}%</strong>
+                  </span>
+                  <ProgressBar value={trip.progress} />
+                </span>
+                <span className="trip-stats">
+                  <strong>{trip.budget}</strong>
+                  <span>{trip.places} places · {trip.travelers} travelers</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="dashboard-side">
+          <AgentActivityFeed />
+          <div className="agent-callout">
+            <p className="eyebrow">Suggested next</p>
+            <h2>Resolve Tokyo booking gaps</h2>
+            <p>Three time-sensitive reservations open within the next 14 days.</p>
+            <button type="button" onClick={() => onOpenTrip("tokyo-spring")}>
+              Review workspace
+            </button>
+          </div>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function TripWorkspace({
+  trip,
+  activePanel,
+  setActivePanel,
+  messages,
+  chatInput,
+  setChatInput,
+  streaming,
+  error,
+  onSendMessage,
+  onBack,
+}) {
+  return (
+    <section className="workspace-view" aria-label={`${trip.title} workspace`}>
+      <header className="workspace-header">
+        <div className="workspace-title">
+          <button className="icon-button" type="button" onClick={onBack} aria-label="Back to dashboard">
+            ←
+          </button>
+          <div>
+            <div className="title-line">
+              <h1>{trip.title}</h1>
+              <StatusPill>{trip.status}</StatusPill>
+            </div>
+            <p>{trip.dates} · {trip.destination} · last saved locally</p>
+          </div>
+        </div>
+        <div className="workspace-actions">
+          <span className="credits-pill">68 credits</span>
+          <button className="secondary-action" type="button">Share preview</button>
+        </div>
+      </header>
+
+      <div className="workspace-grid">
+        <ChatPanel
+          messages={messages}
+          chatInput={chatInput}
+          setChatInput={setChatInput}
+          streaming={streaming}
+          error={error}
+          onSendMessage={onSendMessage}
+        />
+
+        <ItineraryTimeline trip={trip} />
+
+        <ArtifactPanel activePanel={activePanel} setActivePanel={setActivePanel} />
+      </div>
+    </section>
+  );
+}
+
+function AppHeader() {
+  return (
+    <header className="app-header">
+      <div className="brand-lockup" aria-label="Wayfinder OS">
+        <span className="brand-mark" aria-hidden="true" />
+        <div>
+          <p className="brand-name">Wayfinder</p>
+          <p className="brand-subtitle">OS</p>
+        </div>
+      </div>
+      <span className="version-badge">v0.1</span>
+    </header>
+  );
+}
+
+function ChatPanel({ messages, chatInput, setChatInput, streaming, error, onSendMessage }) {
+  return (
+    <aside className="chat-panel">
+      <div className="panel-header">
+        <div>
+          <h2>Planning assistant</h2>
+          <p>Streaming from the existing travel endpoint.</p>
+        </div>
+        {streaming && <span className="streaming-pill">Streaming</span>}
+      </div>
+
+      <div className="message-list" aria-live="polite">
+        {messages.map((message, index) => (
+          <div className={`message ${message.role}`} key={`${message.role}-${index}`}>
+            <span>{message.role === "user" ? "You" : "Wayfinder"}</span>
+            <p>{message.text || "Preparing the first notes..."}</p>
+          </div>
+        ))}
+        {error && <p className="error">{error}</p>}
+      </div>
+
+      <form className="chat-composer" onSubmit={onSendMessage}>
+        <textarea
+          value={chatInput}
+          onChange={(e) => setChatInput(e.target.value)}
+          placeholder="Ask Wayfinder to adjust the itinerary, compare areas, or audit the budget..."
+          disabled={streaming}
+        />
+        <div className="composer-row">
+          <p>Travel planning only in this release.</p>
+          <button className="primary-action compact" type="submit" disabled={streaming || !chatInput.trim()}>
+            {streaming ? "Planning..." : "Send"}
+          </button>
+        </div>
+      </form>
+    </aside>
+  );
+}
+
+function ItineraryTimeline({ trip }) {
+  return (
+    <section className="itinerary-panel">
+      <div className="panel-header sticky-panel-header">
+        <div>
+          <h2>Itinerary</h2>
+          <p>{trip.progress}% ready · balanced pace · mock artifact</p>
+        </div>
+        <button className="secondary-action" type="button">Apr 18-27</button>
+      </div>
+
+      <div className="workflow-strip" aria-label="Agent workflow concepts">
+        {WORKFLOWS.map((workflow) => (
+          <button type="button" key={workflow}>
+            {workflow}
+          </button>
+        ))}
+      </div>
+
+      <div className="timeline">
+        {ITINERARY_DAYS.map((day) => (
+          <article className="day-card" key={day.day}>
+            <header>
+              <span className="day-number">
+                <small>Day</small>
+                <strong>{day.day}</strong>
+              </span>
+              <div>
+                <h3>{day.area}</h3>
+                <p>{day.date} · {day.note}</p>
+              </div>
+              <StatusPill>Easy pace</StatusPill>
+            </header>
+            <div className="timeline-items">
+              {day.items.map((item) => (
+                <div className="timeline-item" key={`${day.day}-${item.title}`}>
+                  <time>{item.time}</time>
+                  <span className="type-chip">{item.type}</span>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.meta}</p>
+                  </div>
+                  <StatusPill>{item.state}</StatusPill>
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ArtifactPanel({ activePanel, setActivePanel }) {
+  const tabs = ["places", "budget", "tasks", "activity"];
 
   return (
-    <div className="answer-board">
-      {sections.map((section, index) => (
-        <AnswerSection section={section} key={`${section.title}-${index}`} />
+    <aside className="artifact-panel">
+      <div className="tabs" role="tablist" aria-label="Trip artifact panels">
+        {tabs.map((tab) => (
+          <button
+            className={activePanel === tab ? "active" : ""}
+            type="button"
+            key={tab}
+            onClick={() => setActivePanel(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {activePanel === "places" && <PlacesPanel />}
+      {activePanel === "budget" && <BudgetPanel />}
+      {activePanel === "tasks" && <TasksPanel />}
+      {activePanel === "activity" && <AgentActivityFeed />}
+    </aside>
+  );
+}
+
+function PlacesPanel() {
+  return (
+    <div className="artifact-content">
+      <PanelTitle title="Place board" sub="Suggested, interested, booked, and skipped places." />
+      {PLACES.map((place, index) => (
+        <div className="place-row" key={place.name}>
+          <span>{index + 1}</span>
+          <div>
+            <strong>{place.name}</strong>
+            <p>{place.kind} · {place.detail}</p>
+          </div>
+          <StatusPill>{place.status}</StatusPill>
+        </div>
       ))}
     </div>
   );
 }
 
-function AnswerSection({ section }) {
-  if (section.kind === "summary") {
-    return (
-      <article className="summary-card">
-        <p className="section-label">Summary</p>
-        <p>{section.body}</p>
-      </article>
-    );
-  }
-
-  if (section.kind === "day") {
-    return (
-      <article className="day-card">
-        <header className="day-header">
-          <span className="day-number">
-            <span>Day</span>
-            <strong>{section.day}</strong>
-          </span>
-          <div>
-            <h3>{section.title}</h3>
-            <p>Balanced pace</p>
-          </div>
-        </header>
-
-        <div className="activity-list">
-          {section.items.map((item, index) => (
-            <div className="activity-row" key={`${item.label}-${index}`}>
-              <span className="activity-marker">{index + 1}</span>
-              <div>
-                {item.label && <p className="activity-label">{item.label}</p>}
-                <p className="activity-text">{item.text}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </article>
-    );
-  }
+function BudgetPanel() {
+  const rows = [
+    ["Flights", "$1,420", "29%"],
+    ["Stays", "$1,760", "36%"],
+    ["Food", "$820", "17%"],
+    ["Transit", "$340", "7%"],
+    ["Activities", "$480", "10%"],
+  ];
 
   return (
-    <article className="note-card">
-      <header>
-        <p className="section-label">{section.label}</p>
-        <h3>{section.title}</h3>
-      </header>
-
-      <div className="note-list">
-        {section.items.map((item, index) => (
-          <div className="note-row" key={`${item.text}-${index}`}>
-            <span className="note-marker">{index + 1}</span>
-            <p>
-              {item.label && <strong>{item.label}: </strong>}
-              {item.text}
-            </p>
+    <div className="artifact-content">
+      <PanelTitle title="$4,820 forecast" sub="$180 under your target." />
+      <ProgressBar value={76} />
+      <div className="budget-list">
+        {rows.map(([label, value, share]) => (
+          <div className="budget-row" key={label}>
+            <span>{label}</span>
+            <strong>{value} <small>{share}</small></strong>
           </div>
         ))}
       </div>
-    </article>
+    </div>
   );
 }
 
-function parseTravelAnswer(answer) {
-  const lines = answer
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && line !== "---");
-
-  const sections = [];
-  let current = null;
-
-  for (const line of lines) {
-    if (line.startsWith("### ") || line.startsWith("## ")) {
-      if (current) sections.push(current);
-      current = sectionFromHeading(line.replace(/^#{2,3}\s+/, ""));
-      continue;
-    }
-
-    if (!current) {
-      current = { kind: "summary", title: "Summary", body: "" };
-    }
-
-    if (current.kind === "summary") {
-      const text = stripMarkdown(line.replace(/^Summary:?/i, "").trim());
-      current.body = [current.body, text].filter(Boolean).join(" ");
-      continue;
-    }
-
-    const item = parseListItem(line);
-    if (item) {
-      current.items.push(item);
-    }
-  }
-
-  if (current) sections.push(current);
-
-  return sections.filter((section) => {
-    if (section.kind === "summary") return section.body;
-    return section.items.length;
-  });
+function TasksPanel() {
+  return (
+    <div className="artifact-content">
+      <PanelTitle title="Booking checklist" sub="Local task state for the workspace shell." />
+      {TASKS.map((task) => (
+        <label className="task-row" key={task.title}>
+          <input type="checkbox" defaultChecked={task.completed} />
+          <span>
+            <strong>{task.title}</strong>
+            <small>{task.due}</small>
+          </span>
+          <StatusPill>{task.priority}</StatusPill>
+        </label>
+      ))}
+    </div>
+  );
 }
 
-function sectionFromHeading(rawTitle) {
-  const title = stripMarkdown(rawTitle);
-  const dayMatch = title.match(/^Day\s+(\d+)\s*[—-]\s*(.+)$/i);
-
-  if (title.toLowerCase() === "summary") {
-    return { kind: "summary", title: "Summary", body: "" };
-  }
-
-  if (dayMatch) {
-    return {
-      kind: "day",
-      day: dayMatch[1],
-      title: dayMatch[2],
-      items: [],
-    };
-  }
-
-  return {
-    kind: "notes",
-    label: title.toLowerCase().includes("recommendation")
-      ? "Recommendations"
-      : "Planning notes",
-    title,
-    items: [],
-  };
+function AgentActivityFeed() {
+  return (
+    <div className="panel activity-panel">
+      <div className="section-heading compact-heading">
+        <div>
+          <h2>Agent activity</h2>
+          <p>Visible workflow concepts for future agent events.</p>
+        </div>
+      </div>
+      {ACTIVITIES.map((activity) => (
+        <div className="activity-row" key={activity.workflow}>
+          <span className={`activity-dot ${activity.status.toLowerCase()}`} />
+          <div>
+            <strong>{activity.workflow}</strong>
+            <p>{activity.detail}</p>
+          </div>
+          <time>{activity.time}</time>
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function parseListItem(line) {
-  const normalized = line.replace(/^[-*]\s+/, "").replace(/^\d+\.\s+/, "");
-
-  if (normalized === line && !line.includes(":")) {
-    return null;
-  }
-
-  const cleaned = stripMarkdown(normalized);
-  const labelMatch = cleaned.match(/^([^:]+):\s+(.+)$/);
-
-  if (labelMatch) {
-    return {
-      label: labelMatch[1],
-      text: labelMatch[2],
-    };
-  }
-
-  return {
-    label: "",
-    text: cleaned,
-  };
+function MetricCard({ label, value, detail, progress }) {
+  return (
+    <div className="metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <p>{detail}</p>
+      {typeof progress === "number" && <ProgressBar value={progress} />}
+    </div>
+  );
 }
 
-function stripMarkdown(text) {
-  return text
-    .replace(/\*\*/g, "")
-    .replace(/`/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+function ProgressBar({ value }) {
+  return (
+    <span className="progress-bar" aria-label={`${value}%`}>
+      <span style={{ width: `${value}%` }} />
+    </span>
+  );
+}
+
+function PanelTitle({ title, sub }) {
+  return (
+    <div className="panel-title">
+      <h2>{title}</h2>
+      <p>{sub}</p>
+    </div>
+  );
+}
+
+function StatusPill({ children }) {
+  return <span className="status-pill">{children}</span>;
 }
