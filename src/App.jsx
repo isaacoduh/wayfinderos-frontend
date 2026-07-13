@@ -211,17 +211,13 @@ export default function App() {
     setMessages((current) => [...current, optimisticUser, assistantDraft]);
 
     let assistantText = "";
+    let streamFailed = false;
 
     try {
-      await api(`/trips/${selectedTripId}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ role: "user", content: text }),
-      });
-
-      const res = await fetch(`${API_URL}/travel-query`, {
+      const res = await fetch(`${API_URL}/trips/${selectedTripId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: text }),
+        body: JSON.stringify({ message: text }),
       });
 
       if (!res.ok || !res.body) {
@@ -255,22 +251,20 @@ export default function App() {
           }
 
           if (event.type === "error") {
+            streamFailed = true;
             setError(event.message || "Something went wrong. Please try again.");
+          }
+
+          if (event.type === "done") {
+            const savedMessages = await api(`/trips/${selectedTripId}/messages`);
+            setMessages(savedMessages.map((message) => ({ ...message, text: message.content })));
           }
         }
       }
 
-      if (assistantText.trim()) {
-        const savedAssistant = await api(`/trips/${selectedTripId}/messages`, {
-          method: "POST",
-          body: JSON.stringify({ role: "assistant", content: assistantText }),
-        });
-
-        setMessages((current) =>
-          current.map((message, index) =>
-            index === current.length - 1 ? { ...savedAssistant, text: savedAssistant.content } : message,
-          ),
-        );
+      if (streamFailed) {
+        const savedMessages = await api(`/trips/${selectedTripId}/messages`);
+        setMessages(savedMessages.map((message) => ({ ...message, text: message.content })));
       }
     } catch (err) {
       setError("Something went wrong. Please try again.");
@@ -570,7 +564,7 @@ function AppHeader({ user }) {
       </div>
       <div className="header-meta">
         {user && <span className="version-badge">{user.display_name}</span>}
-        <span className="version-badge">v0.2</span>
+        <span className="version-badge">v0.3</span>
       </div>
     </header>
   );
@@ -581,8 +575,8 @@ function ChatPanel({ messages, chatInput, setChatInput, streaming, error, onSend
     <aside className="chat-panel">
       <div className="panel-header">
         <div>
-          <h2>Planning assistant</h2>
-          <p>Streaming remains live; final messages are saved to this trip.</p>
+          <h2>Trip-aware assistant</h2>
+          <p>Using this trip's itinerary, places, budget, and chat history.</p>
         </div>
         {streaming && <span className="streaming-pill">Streaming</span>}
       </div>
@@ -605,7 +599,7 @@ function ChatPanel({ messages, chatInput, setChatInput, streaming, error, onSend
           disabled={streaming}
         />
         <div className="composer-row">
-          <p>Saved in this shared beta trip after the stream finishes.</p>
+          <p>Context: itinerary, places, budget, and prior messages.</p>
           <button className="primary-action compact" type="submit" disabled={streaming || !chatInput.trim()}>
             {streaming ? "Planning..." : "Send"}
           </button>
