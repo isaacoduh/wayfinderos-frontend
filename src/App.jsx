@@ -144,6 +144,10 @@ export default function App() {
 
   const selectedTripId = selectedTrip?.id;
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 });
+  }, [view, selectedTripId]);
+
   const loadTrips = useCallback(async () => {
     const data = await api("/trips");
     setTrips(data);
@@ -624,7 +628,7 @@ function LandingPage({ onEnterBeta }) {
         <div className="header-meta">
           <span className="version-badge">v0.75 beta</span>
           <button className="secondary-action compact" type="button" onClick={onEnterBeta}>
-            Enter beta
+            Enter
           </button>
         </div>
       </header>
@@ -632,7 +636,7 @@ function LandingPage({ onEnterBeta }) {
       <section className="landing-hero">
         <div className="landing-hero-copy">
           <p className="eyebrow">Travel planning workspace</p>
-          <h1>Turn messy travel planning conversations into structured trips.</h1>
+          <h1>Trips you can shape, edit, and share.</h1>
           <p className="hero-copy">
             Wayfinder OS helps you shape trip ideas into a durable workspace with chat, itinerary days, saved places,
             budgets, checklists, editable regeneration, and read-only share pages.
@@ -641,7 +645,6 @@ function LandingPage({ onEnterBeta }) {
             <button className="primary-action" type="button" onClick={onEnterBeta}>
               Enter beta workspace
             </button>
-            <span className="version-badge">Sample share links are created after publishing a trip</span>
           </div>
         </div>
 
@@ -694,7 +697,7 @@ function LandingPage({ onEnterBeta }) {
         <div className="section-heading plain">
           <div>
             <p className="eyebrow">Current capabilities</p>
-            <h2>What works in this beta</h2>
+            <h2>Built for the current beta</h2>
           </div>
         </div>
         <div className="landing-card-grid">
@@ -848,6 +851,7 @@ function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip 
                   <strong>{formatBudget(trip.budget_amount)}</strong>
                   <span>Shared beta workspace</span>
                 </span>
+                <span className="trip-open-indicator">Open workspace</span>
               </button>
             ))}
 
