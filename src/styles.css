@@ -567,6 +567,10 @@ h3,
   background: var(--warning);
 }
 
+.activity-dot.active {
+  background: var(--primary);
+}
+
 .workspace-view {
   min-height: 100vh;
 }
@@ -736,6 +740,66 @@ textarea:focus {
 .workflow-strip button:hover {
   border-color: var(--primary);
   color: var(--primary);
+}
+
+.workflow-strip .build-trip-button {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+.workflow-strip .build-trip-button:hover:not(:disabled) {
+  background: var(--primary-strong);
+  color: #fff;
+}
+
+.workflow-strip button:disabled {
+  opacity: 0.58;
+}
+
+.build-trip-progress {
+  display: grid;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgb(255 253 250 / 72%);
+  padding: 14px 18px;
+}
+
+.build-trip-progress strong {
+  font-size: 13px;
+}
+
+.build-trip-progress p,
+.build-event-row small,
+.budget-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.build-trip-progress p {
+  margin-top: 3px;
+}
+
+.build-event-list {
+  display: grid;
+  gap: 8px;
+}
+
+.build-event-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.build-event-row span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.build-summary {
+  border-left: 3px solid var(--primary);
+  padding-left: 10px;
 }
 
 .timeline {
@@ -975,6 +1039,11 @@ textarea:focus {
 
 .budget-row small {
   font-weight: 700;
+}
+
+.budget-note {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
 }
 
 .error {

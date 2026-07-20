@@ -68,11 +68,11 @@ function formatTime(value) {
   return value.slice(0, 5);
 }
 
-function formatBudget(value) {
+function formatBudget(value, currency = "USD") {
   if (value === null || value === undefined) return "Budget TBD";
   return new Intl.NumberFormat(undefined, {
     style: "currency",
-    currency: "USD",
+    currency,
     maximumFractionDigits: 0,
   }).format(Number(value));
 }
@@ -92,7 +92,12 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [itineraryDays, setItineraryDays] = useState([]);
   const [tripPlaces, setTripPlaces] = useState([]);
+  const [checklistItems, setChecklistItems] = useState([]);
+  const [agentEvents, setAgentEvents] = useState([]);
   const [streaming, setStreaming] = useState(false);
+  const [buildTripStreaming, setBuildTripStreaming] = useState(false);
+  const [buildTripEvents, setBuildTripEvents] = useState([]);
+  const [buildTripSummary, setBuildTripSummary] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -109,17 +114,21 @@ export default function App() {
     setError("");
 
     try {
-      const [trip, savedMessages, itinerary, places] = await Promise.all([
+      const [trip, savedMessages, itinerary, places, checklist, events] = await Promise.all([
         api(`/trips/${tripId}`),
         api(`/trips/${tripId}/messages`),
         api(`/trips/${tripId}/itinerary`),
         api(`/trips/${tripId}/places`),
+        api(`/trips/${tripId}/checklist`),
+        api(`/trips/${tripId}/agent-events`),
       ]);
 
       setSelectedTrip(trip);
       setMessages(savedMessages.map((message) => ({ ...message, text: message.content })));
       setItineraryDays(itinerary);
       setTripPlaces(places);
+      setChecklistItems(checklist);
+      setAgentEvents(events);
       setView("workspace");
     } catch (err) {
       setError("Could not load this trip workspace.");
@@ -273,6 +282,75 @@ export default function App() {
     }
   }
 
+  async function runBuildTrip() {
+    if (!selectedTripId || buildTripStreaming || streaming) return;
+
+    setError("");
+    setBuildTripStreaming(true);
+    setBuildTripEvents([]);
+    setBuildTripSummary("");
+    setActivePanel("activity");
+
+    let summary = "";
+
+    try {
+      const res = await fetch(`${API_URL}/trips/${selectedTripId}/agent/build-trip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!res.ok || !res.body) {
+        throw new Error("Request failed");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          const event = JSON.parse(line);
+
+          if (event.type === "agent_event") {
+            setBuildTripEvents((current) => [
+              ...current,
+              {
+                event: event.event,
+                payload: event.payload || {},
+              },
+            ]);
+          }
+
+          if (event.type === "delta") {
+            summary += event.text;
+            setBuildTripSummary(summary);
+          }
+
+          if (event.type === "error") {
+            setError(event.message || "Build My Trip failed. Please try again.");
+          }
+
+          if (event.type === "done") {
+            await loadWorkspace(selectedTripId);
+          }
+        }
+      }
+    } catch (err) {
+      setError("Build My Trip failed. Please try again.");
+    } finally {
+      setBuildTripStreaming(false);
+    }
+  }
+
   async function updateItineraryItem(itemId, patch) {
     const previous = itineraryDays;
     setItineraryDays((days) =>
@@ -340,6 +418,11 @@ export default function App() {
           trip={selectedTrip}
           itineraryDays={itineraryDays}
           tripPlaces={tripPlaces}
+          checklistItems={checklistItems}
+          agentEvents={agentEvents}
+          buildTripStreaming={buildTripStreaming}
+          buildTripEvents={buildTripEvents}
+          buildTripSummary={buildTripSummary}
           activePanel={activePanel}
           setActivePanel={setActivePanel}
           messages={messages}
@@ -349,6 +432,7 @@ export default function App() {
           loading={loading}
           error={error}
           onSendMessage={sendChatMessage}
+          onBuildTrip={runBuildTrip}
           onUpdateItineraryItem={updateItineraryItem}
           onUpdateTripPlace={updateTripPlace}
           onBack={async () => {
@@ -482,6 +566,11 @@ function TripWorkspace({
   trip,
   itineraryDays,
   tripPlaces,
+  checklistItems,
+  agentEvents,
+  buildTripStreaming,
+  buildTripEvents,
+  buildTripSummary,
   activePanel,
   setActivePanel,
   messages,
@@ -491,6 +580,7 @@ function TripWorkspace({
   loading,
   error,
   onSendMessage,
+  onBuildTrip,
   onUpdateItineraryItem,
   onUpdateTripPlace,
   onBack,
@@ -538,13 +628,20 @@ function TripWorkspace({
           trip={trip}
           itineraryDays={itineraryDays}
           loading={loading}
+          buildTripStreaming={buildTripStreaming}
+          buildTripEvents={buildTripEvents}
+          buildTripSummary={buildTripSummary}
+          onBuildTrip={onBuildTrip}
           onUpdateItineraryItem={onUpdateItineraryItem}
         />
 
         <ArtifactPanel
           activePanel={activePanel}
           setActivePanel={setActivePanel}
+          trip={trip}
           tripPlaces={tripPlaces}
+          checklistItems={checklistItems}
+          agentEvents={agentEvents}
           onUpdateTripPlace={onUpdateTripPlace}
         />
       </div>
@@ -564,7 +661,7 @@ function AppHeader({ user }) {
       </div>
       <div className="header-meta">
         {user && <span className="version-badge">{user.display_name}</span>}
-        <span className="version-badge">v0.3</span>
+        <span className="version-badge">v0.4</span>
       </div>
     </header>
   );
@@ -609,7 +706,16 @@ function ChatPanel({ messages, chatInput, setChatInput, streaming, error, onSend
   );
 }
 
-function ItineraryTimeline({ trip, itineraryDays, loading, onUpdateItineraryItem }) {
+function ItineraryTimeline({
+  trip,
+  itineraryDays,
+  loading,
+  buildTripStreaming,
+  buildTripEvents,
+  buildTripSummary,
+  onBuildTrip,
+  onUpdateItineraryItem,
+}) {
   return (
     <section className="itinerary-panel">
       <div className="panel-header sticky-panel-header">
@@ -625,12 +731,19 @@ function ItineraryTimeline({ trip, itineraryDays, loading, onUpdateItineraryItem
       </div>
 
       <div className="workflow-strip" aria-label="Agent workflow concepts">
+        <button className="build-trip-button" type="button" onClick={onBuildTrip} disabled={buildTripStreaming || loading}>
+          {buildTripStreaming ? "Building trip..." : "Build My Trip"}
+        </button>
         {WORKFLOWS.map((workflow) => (
-          <button type="button" key={workflow}>
+          <button type="button" key={workflow} disabled>
             {workflow}
           </button>
         ))}
       </div>
+
+      {(buildTripStreaming || buildTripEvents.length > 0 || buildTripSummary) && (
+        <BuildTripProgress events={buildTripEvents} streaming={buildTripStreaming} summary={buildTripSummary} />
+      )}
 
       <div className="timeline">
         {itineraryDays.map((day) => (
@@ -694,7 +807,45 @@ function ItineraryTimeline({ trip, itineraryDays, loading, onUpdateItineraryItem
   );
 }
 
-function ArtifactPanel({ activePanel, setActivePanel, tripPlaces, onUpdateTripPlace }) {
+function formatEventName(value) {
+  if (!value) return "Agent event";
+  return value
+    .split(".")
+    .map((part) => part.replace(/_/g, " "))
+    .join(" / ");
+}
+
+function formatEventDetail(payload) {
+  if (!payload || !Object.keys(payload).length) return "";
+  return Object.entries(payload)
+    .map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`)
+    .join(" · ");
+}
+
+function BuildTripProgress({ events, streaming, summary }) {
+  return (
+    <div className="build-trip-progress" aria-live="polite">
+      <div>
+        <strong>{streaming ? "Build My Trip is updating this workspace" : "Build My Trip completed"}</strong>
+        <p>Progress is streamed from the agent workflow and persisted as trip activity.</p>
+      </div>
+      <div className="build-event-list">
+        {events.slice(-6).map((event, index) => (
+          <div className="build-event-row" key={`${event.event}-${index}`}>
+            <span className="activity-dot active" />
+            <span>
+              <strong>{formatEventName(event.event)}</strong>
+              {formatEventDetail(event.payload) && <small>{formatEventDetail(event.payload)}</small>}
+            </span>
+          </div>
+        ))}
+      </div>
+      {summary && <p className="build-summary">{summary}</p>}
+    </div>
+  );
+}
+
+function ArtifactPanel({ activePanel, setActivePanel, trip, tripPlaces, checklistItems, agentEvents, onUpdateTripPlace }) {
   const tabs = ["places", "budget", "tasks", "activity"];
 
   return (
@@ -708,9 +859,9 @@ function ArtifactPanel({ activePanel, setActivePanel, tripPlaces, onUpdateTripPl
       </div>
 
       {activePanel === "places" && <PlacesPanel tripPlaces={tripPlaces} onUpdateTripPlace={onUpdateTripPlace} />}
-      {activePanel === "budget" && <BudgetPanel />}
-      {activePanel === "tasks" && <TasksPanel />}
-      {activePanel === "activity" && <AgentActivityFeed />}
+      {activePanel === "budget" && <BudgetPanel trip={trip} />}
+      {activePanel === "tasks" && <TasksPanel checklistItems={checklistItems} />}
+      {activePanel === "activity" && <AgentActivityFeed activities={agentEvents} />}
     </aside>
   );
 }
@@ -753,19 +904,38 @@ function PlacesPanel({ tripPlaces, onUpdateTripPlace }) {
   );
 }
 
-function BudgetPanel() {
-  const rows = [
-    ["Flights", "TBD", "Estimate"],
-    ["Stays", "TBD", "Estimate"],
-    ["Food", "TBD", "Estimate"],
-    ["Transit", "TBD", "Estimate"],
-    ["Activities", "TBD", "Estimate"],
-  ];
+function BudgetPanel({ trip }) {
+  const budget = trip?.planning_context?.build_trip?.budget;
+  const currency = budget?.currency || "USD";
+  const rows = budget?.categories?.length
+    ? budget.categories.map((category) => [
+        category.name,
+        new Intl.NumberFormat(undefined, {
+          style: "currency",
+          currency,
+          maximumFractionDigits: 0,
+        }).format(Number(category.amount || 0)),
+        "Estimate",
+      ])
+    : [
+        ["Flights", "TBD", "Estimate"],
+        ["Stays", "TBD", "Estimate"],
+        ["Food", "TBD", "Estimate"],
+        ["Transit", "TBD", "Estimate"],
+        ["Activities", "TBD", "Estimate"],
+      ];
 
   return (
     <div className="artifact-content">
-      <PanelTitle title="Budget forecast" sub="Trip-level budget persists; category detail stays lightweight for v0.2." />
-      <ProgressBar value={64} />
+      <PanelTitle
+        title="Budget forecast"
+        sub={
+          budget?.total_estimate
+            ? `Build My Trip estimated ${formatBudget(budget.total_estimate, currency)}.`
+            : "Build My Trip will persist category estimates here."
+        }
+      />
+      <ProgressBar value={budget?.total_estimate ? 72 : 24} />
       <div className="budget-list">
         {rows.map(([label, value, share]) => (
           <div className="budget-row" key={label}>
@@ -776,51 +946,66 @@ function BudgetPanel() {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-function TasksPanel() {
-  const tasks = [
-    { title: "Review saved itinerary", due: "Shared beta", priority: "High", completed: false },
-    { title: "Confirm booked toggles", due: "After changes", priority: "Medium", completed: false },
-    { title: "Verify place statuses", due: "After refresh", priority: "Medium", completed: true },
-  ];
-
-  return (
-    <div className="artifact-content">
-      <PanelTitle title="Booking checklist" sub="Checklist persistence is modeled but not surfaced as an editor yet." />
-      {tasks.map((task) => (
-        <label className="task-row" key={task.title}>
-          <input type="checkbox" defaultChecked={task.completed} />
-          <span>
-            <strong>{task.title}</strong>
-            <small>{task.due}</small>
-          </span>
-          <StatusPill>{task.priority}</StatusPill>
-        </label>
+      {budget?.notes?.map((note) => (
+        <p className="budget-note" key={note}>
+          {note}
+        </p>
       ))}
     </div>
   );
 }
 
-function AgentActivityFeed() {
+function TasksPanel({ checklistItems }) {
+  return (
+    <div className="artifact-content">
+      <PanelTitle title="Booking checklist" sub="Generated checklist items persist with the trip." />
+      {checklistItems.map((task) => (
+        <label className="task-row" key={task.id}>
+          <input type="checkbox" checked={task.is_completed} readOnly />
+          <span>
+            <strong>{task.title}</strong>
+            <small>{task.due_label || "No due label"}</small>
+          </span>
+          <StatusPill>{formatStatus(task.priority || "medium")}</StatusPill>
+        </label>
+      ))}
+
+      {!checklistItems.length && (
+        <div className="empty-state compact">
+          <strong>No checklist yet</strong>
+          <p>Run Build My Trip to generate booking and preparation tasks.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentActivityFeed({ activities = FALLBACK_ACTIVITIES }) {
+  const rows = activities.length
+    ? activities.map((activity) => ({
+        workflow: activity.title || activity.workflow || formatEventName(activity.event_type),
+        detail: activity.detail || formatEventDetail(activity.payload),
+        time: activity.created_at ? formatDate(activity.created_at.slice(0, 10)) : activity.time,
+        status: activity.status || "active",
+      }))
+    : FALLBACK_ACTIVITIES;
+
   return (
     <div className="panel activity-panel">
       <div className="section-heading compact-heading">
         <div>
           <h2>Agent activity</h2>
-          <p>Lightweight workflow concepts for future durable agent events.</p>
+          <p>Durable workflow events saved with this trip.</p>
         </div>
       </div>
-      {FALLBACK_ACTIVITIES.map((activity) => (
-        <div className="activity-row" key={activity.workflow}>
+      {rows.map((activity, index) => (
+        <div className="activity-row" key={`${activity.workflow}-${index}`}>
           <span className={`activity-dot ${activity.status.toLowerCase()}`} />
           <div>
             <strong>{activity.workflow}</strong>
             <p>{activity.detail}</p>
           </div>
-          <time>{activity.time}</time>
+          <time>{activity.time || `#${index + 1}`}</time>
         </div>
       ))}
     </div>
