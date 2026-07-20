@@ -5,6 +5,7 @@ const BETA_USER_KEY = "wayfinder_beta_user_id";
 
 const WORKFLOWS = ["Optimize itinerary", "Find alternatives", "Budget audit", "Booking readiness"];
 const PLACE_STATUSES = ["suggested", "interested", "booked", "skipped"];
+const WORKFLOW_TERMINAL_STATUSES = new Set(["completed", "failed", "canceled"]);
 
 const FALLBACK_ACTIVITIES = [
   {
@@ -82,6 +83,23 @@ function formatStatus(value) {
   return value.slice(0, 1).toUpperCase() + value.slice(1);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createIdempotencyKey(prefix) {
+  if (window.crypto?.randomUUID) return `${prefix}-${window.crypto.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeRunEvents(run) {
+  return (run.events || []).map((event) => ({
+    event: event.event_type,
+    payload: event.payload || {},
+    status: event.status,
+  }));
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [view, setView] = useState("access");
@@ -98,9 +116,11 @@ export default function App() {
   const [buildTripStreaming, setBuildTripStreaming] = useState(false);
   const [buildTripEvents, setBuildTripEvents] = useState([]);
   const [buildTripSummary, setBuildTripSummary] = useState("");
+  const [buildTripStatus, setBuildTripStatus] = useState("");
   const [regenerateDayStreaming, setRegenerateDayStreaming] = useState(false);
   const [regenerateDayEvents, setRegenerateDayEvents] = useState([]);
   const [regenerateDaySummary, setRegenerateDaySummary] = useState("");
+  const [regenerateDayStatus, setRegenerateDayStatus] = useState("");
   const [regenerateDayTarget, setRegenerateDayTarget] = useState(null);
   const [regenerateInstruction, setRegenerateInstruction] = useState("");
   const [loading, setLoading] = useState(false);
@@ -294,60 +314,36 @@ export default function App() {
     setBuildTripStreaming(true);
     setBuildTripEvents([]);
     setBuildTripSummary("");
+    setBuildTripStatus("queued");
     setActivePanel("activity");
 
-    let summary = "";
-
     try {
-      const res = await fetch(`${API_URL}/trips/${selectedTripId}/agent/build-trip`, {
+      const startedRun = await api(`/trips/${selectedTripId}/agent/build-trip`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Idempotency-Key": createIdempotencyKey("build-trip") },
       });
 
-      if (!res.ok || !res.body) {
-        throw new Error("Request failed");
+      let run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`);
+      setBuildTripStatus(run.status);
+      setBuildTripEvents(normalizeRunEvents(run));
+      setBuildTripSummary(run.output_summary || "");
+
+      while (!WORKFLOW_TERMINAL_STATUSES.has(run.status)) {
+        await sleep(1000);
+        run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`);
+        setBuildTripStatus(run.status);
+        setBuildTripEvents(normalizeRunEvents(run));
+        setBuildTripSummary(run.output_summary || "");
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      setBuildTripStatus(run.status);
+      setBuildTripEvents(normalizeRunEvents(run));
+      setBuildTripSummary(run.output_summary || "");
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-
-          const event = JSON.parse(line);
-
-          if (event.type === "agent_event") {
-            setBuildTripEvents((current) => [
-              ...current,
-              {
-                event: event.event,
-                payload: event.payload || {},
-              },
-            ]);
-          }
-
-          if (event.type === "delta") {
-            summary += event.text;
-            setBuildTripSummary(summary);
-          }
-
-          if (event.type === "error") {
-            setError(event.message || "Build My Trip failed. Please try again.");
-          }
-
-          if (event.type === "done") {
-            await loadWorkspace(selectedTripId);
-          }
-        }
+      if (run.status === "completed") {
+        await loadWorkspace(selectedTripId);
+      } else if (run.status === "failed") {
+        setError(run.error_message || "Build My Trip failed. Please try again.");
       }
     } catch (err) {
       setError("Build My Trip failed. Please try again.");
@@ -366,63 +362,39 @@ export default function App() {
     setRegenerateDayStreaming(true);
     setRegenerateDayEvents([]);
     setRegenerateDaySummary("");
+    setRegenerateDayStatus("queued");
     setActivePanel("activity");
 
-    let summary = "";
-
     try {
-      const res = await fetch(`${API_URL}/trips/${selectedTripId}/agent/regenerate-day/${regenerateDayTarget.id}`, {
+      const startedRun = await api(`/trips/${selectedTripId}/agent/regenerate-day/${regenerateDayTarget.id}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Idempotency-Key": createIdempotencyKey("regenerate-day") },
         body: JSON.stringify({ instruction }),
       });
 
-      if (!res.ok || !res.body) {
-        throw new Error("Request failed");
+      let run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`);
+      setRegenerateDayStatus(run.status);
+      setRegenerateDayEvents(normalizeRunEvents(run));
+      setRegenerateDaySummary(run.output_summary || "");
+
+      while (!WORKFLOW_TERMINAL_STATUSES.has(run.status)) {
+        await sleep(1000);
+        run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`);
+        setRegenerateDayStatus(run.status);
+        setRegenerateDayEvents(normalizeRunEvents(run));
+        setRegenerateDaySummary(run.output_summary || "");
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      setRegenerateDayStatus(run.status);
+      setRegenerateDayEvents(normalizeRunEvents(run));
+      setRegenerateDaySummary(run.output_summary || "");
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-
-          const event = JSON.parse(line);
-
-          if (event.type === "agent_event") {
-            setRegenerateDayEvents((current) => [
-              ...current,
-              {
-                event: event.event,
-                payload: event.payload || {},
-              },
-            ]);
-          }
-
-          if (event.type === "delta") {
-            summary += event.text;
-            setRegenerateDaySummary(summary);
-          }
-
-          if (event.type === "error") {
-            setError(event.message || "Day regeneration failed. Please try again.");
-          }
-
-          if (event.type === "done") {
-            await loadWorkspace(selectedTripId);
-            setRegenerateDayTarget(null);
-            setRegenerateInstruction("");
-          }
-        }
+      if (run.status === "completed") {
+        await loadWorkspace(selectedTripId);
+        setRegenerateDayTarget(null);
+        setRegenerateInstruction("");
+      } else if (run.status === "failed") {
+        setError(run.error_message || "Day regeneration failed. Please try again.");
       }
     } catch (err) {
       setError("Day regeneration failed. Please try again.");
@@ -503,9 +475,11 @@ export default function App() {
           buildTripStreaming={buildTripStreaming}
           buildTripEvents={buildTripEvents}
           buildTripSummary={buildTripSummary}
+          buildTripStatus={buildTripStatus}
           regenerateDayStreaming={regenerateDayStreaming}
           regenerateDayEvents={regenerateDayEvents}
           regenerateDaySummary={regenerateDaySummary}
+          regenerateDayStatus={regenerateDayStatus}
           regenerateDayTarget={regenerateDayTarget}
           regenerateInstruction={regenerateInstruction}
           setRegenerateInstruction={setRegenerateInstruction}
@@ -574,7 +548,7 @@ function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip 
           <p className="eyebrow">Trip control center</p>
           <h1>Plan, shape, and track every trip in one workspace.</h1>
           <p className="hero-copy">
-            Wayfinder OS v0.5 saves trips, protects locked details, and regenerates editable itinerary sections.
+            Wayfinder OS v0.6 runs heavy planning workflows through durable background jobs.
           </p>
         </div>
         <button className="primary-action" type="button" onClick={onCreateTrip} disabled={loading}>
@@ -665,9 +639,11 @@ function TripWorkspace({
   buildTripStreaming,
   buildTripEvents,
   buildTripSummary,
+  buildTripStatus,
   regenerateDayStreaming,
   regenerateDayEvents,
   regenerateDaySummary,
+  regenerateDayStatus,
   regenerateDayTarget,
   regenerateInstruction,
   setRegenerateInstruction,
@@ -734,9 +710,11 @@ function TripWorkspace({
           buildTripStreaming={buildTripStreaming}
           buildTripEvents={buildTripEvents}
           buildTripSummary={buildTripSummary}
+          buildTripStatus={buildTripStatus}
           regenerateDayStreaming={regenerateDayStreaming}
           regenerateDayEvents={regenerateDayEvents}
           regenerateDaySummary={regenerateDaySummary}
+          regenerateDayStatus={regenerateDayStatus}
           regenerateDayTarget={regenerateDayTarget}
           regenerateInstruction={regenerateInstruction}
           setRegenerateInstruction={setRegenerateInstruction}
@@ -773,7 +751,7 @@ function AppHeader({ user }) {
       </div>
       <div className="header-meta">
         {user && <span className="version-badge">{user.display_name}</span>}
-        <span className="version-badge">v0.5</span>
+        <span className="version-badge">v0.6</span>
       </div>
     </header>
   );
@@ -825,9 +803,11 @@ function ItineraryTimeline({
   buildTripStreaming,
   buildTripEvents,
   buildTripSummary,
+  buildTripStatus,
   regenerateDayStreaming,
   regenerateDayEvents,
   regenerateDaySummary,
+  regenerateDayStatus,
   regenerateDayTarget,
   regenerateInstruction,
   setRegenerateInstruction,
@@ -869,8 +849,10 @@ function ItineraryTimeline({
           events={buildTripEvents}
           streaming={buildTripStreaming}
           summary={buildTripSummary}
+          status={buildTripStatus}
           activeTitle="Build My Trip is updating this workspace"
           completeTitle="Build My Trip completed"
+          failedTitle="Build My Trip failed"
         />
       )}
 
@@ -879,8 +861,10 @@ function ItineraryTimeline({
           events={regenerateDayEvents}
           streaming={regenerateDayStreaming}
           summary={regenerateDaySummary}
+          status={regenerateDayStatus}
           activeTitle="Wayfinder is regenerating this day"
           completeTitle="Day regeneration completed"
+          failedTitle="Day regeneration failed"
         />
       )}
 
@@ -984,12 +968,14 @@ function formatEventDetail(payload) {
     .join(" · ");
 }
 
-function WorkflowProgress({ events, streaming, summary, activeTitle, completeTitle }) {
+function WorkflowProgress({ events, streaming, summary, status, activeTitle, completeTitle, failedTitle }) {
+  const title = status === "failed" ? failedTitle : streaming ? activeTitle : completeTitle;
+
   return (
     <div className="build-trip-progress" aria-live="polite">
       <div>
-        <strong>{streaming ? activeTitle : completeTitle}</strong>
-        <p>Progress is streamed from the agent workflow and persisted as trip activity.</p>
+        <strong>{title}</strong>
+        <p>Progress is loaded from durable workflow events saved with this trip.</p>
       </div>
       <div className="build-event-list">
         {events.slice(-6).map((event, index) => (
