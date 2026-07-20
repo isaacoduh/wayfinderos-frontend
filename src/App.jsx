@@ -44,6 +44,16 @@ async function api(path, options = {}) {
   return res.json();
 }
 
+function getShareSlugFromPath() {
+  const match = window.location.pathname.match(/^\/share\/([^/]+)\/?$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function absoluteShareUrl(sharePath) {
+  if (!sharePath) return "";
+  return `${window.location.origin}${sharePath}`;
+}
+
 function formatDateRange(trip) {
   if (!trip.start_date && !trip.end_date) return "Dates not set";
   if (trip.start_date && trip.end_date) return `${formatDate(trip.start_date)}-${formatDate(trip.end_date)}`;
@@ -101,10 +111,14 @@ function normalizeRunEvents(run) {
 }
 
 export default function App() {
+  const publicShareSlug = getShareSlugFromPath();
   const [user, setUser] = useState(null);
-  const [view, setView] = useState("access");
+  const [view, setView] = useState(publicShareSlug ? "share" : "access");
   const [trips, setTrips] = useState([]);
   const [selectedTrip, setSelectedTrip] = useState(null);
+  const [shareStatus, setShareStatus] = useState(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const [activePanel, setActivePanel] = useState("places");
   const [chatInput, setChatInput] = useState("");
   const [messages, setMessages] = useState([]);
@@ -139,16 +153,19 @@ export default function App() {
     setError("");
 
     try {
-      const [trip, savedMessages, itinerary, places, checklist, events] = await Promise.all([
+      const [trip, savedMessages, itinerary, places, checklist, events, share] = await Promise.all([
         api(`/trips/${tripId}`),
         api(`/trips/${tripId}/messages`),
         api(`/trips/${tripId}/itinerary`),
         api(`/trips/${tripId}/places`),
         api(`/trips/${tripId}/checklist`),
         api(`/trips/${tripId}/agent-events`),
+        api(`/trips/${tripId}/share`),
       ]);
 
       setSelectedTrip(trip);
+      setShareStatus(share);
+      setShareCopied(false);
       setMessages(savedMessages.map((message) => ({ ...message, text: message.content })));
       setItineraryDays(itinerary);
       setTripPlaces(places);
@@ -163,6 +180,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (publicShareSlug) return;
     if (!localStorage.getItem(BETA_USER_KEY)) return;
 
     let cancelled = false;
@@ -187,7 +205,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [loadTrips]);
+  }, [loadTrips, publicShareSlug]);
 
   async function continueAsBetaTester() {
     setLoading(true);
@@ -446,6 +464,72 @@ export default function App() {
     }
   }
 
+  async function publishSharePage() {
+    if (!selectedTripId || shareBusy) return;
+
+    setShareBusy(true);
+    setShareCopied(false);
+    setError("");
+
+    try {
+      const status = await api(`/trips/${selectedTripId}/share`, { method: "POST" });
+      setShareStatus(status);
+      const [trip, tripsData] = await Promise.all([api(`/trips/${selectedTripId}`), loadTrips()]);
+      setSelectedTrip(trip);
+      setTrips(tripsData);
+    } catch (err) {
+      setError("Could not publish this share page.");
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function unpublishSharePage() {
+    if (!selectedTripId || shareBusy) return;
+
+    setShareBusy(true);
+    setShareCopied(false);
+    setError("");
+
+    try {
+      const status = await api(`/trips/${selectedTripId}/share`, { method: "DELETE" });
+      setShareStatus(status);
+      const [trip, tripsData] = await Promise.all([api(`/trips/${selectedTripId}`), loadTrips()]);
+      setSelectedTrip(trip);
+      setTrips(tripsData);
+    } catch (err) {
+      setError("Could not unpublish this share page.");
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function copyShareLink() {
+    const url = absoluteShareUrl(shareStatus?.share_path);
+    if (!url) return;
+
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1800);
+    } catch (err) {
+      setError("Could not copy the share link.");
+    }
+  }
+
+  function openSharePage() {
+    const url = absoluteShareUrl(shareStatus?.share_path);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  if (view === "share") {
+    return (
+      <main className="app">
+        <PublicSharePage shareSlug={publicShareSlug} />
+      </main>
+    );
+  }
+
   if (view === "access") {
     return (
       <main className="app">
@@ -491,6 +575,13 @@ export default function App() {
           streaming={streaming}
           loading={loading}
           error={error}
+          shareStatus={shareStatus}
+          shareBusy={shareBusy}
+          shareCopied={shareCopied}
+          onPublishShare={publishSharePage}
+          onCopyShare={copyShareLink}
+          onOpenShare={openSharePage}
+          onUnpublishShare={unpublishSharePage}
           onSendMessage={sendChatMessage}
           onBuildTrip={runBuildTrip}
           onOpenRegenerateDay={setRegenerateDayTarget}
@@ -548,7 +639,7 @@ function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip 
           <p className="eyebrow">Trip control center</p>
           <h1>Plan, shape, and track every trip in one workspace.</h1>
           <p className="hero-copy">
-            Wayfinder OS v0.6 runs heavy planning workflows through durable background jobs.
+            Wayfinder OS v0.7 turns durable trip state into polished read-only share pages.
           </p>
         </div>
         <button className="primary-action" type="button" onClick={onCreateTrip} disabled={loading}>
@@ -655,6 +746,13 @@ function TripWorkspace({
   streaming,
   loading,
   error,
+  shareStatus,
+  shareBusy,
+  shareCopied,
+  onPublishShare,
+  onCopyShare,
+  onOpenShare,
+  onUnpublishShare,
   onSendMessage,
   onBuildTrip,
   onOpenRegenerateDay,
@@ -685,9 +783,15 @@ function TripWorkspace({
         </div>
         <div className="workspace-actions">
           <span className="credits-pill">Shared beta</span>
-          <button className="secondary-action" type="button" disabled>
-            Share preview
-          </button>
+          <ShareControls
+            shareStatus={shareStatus}
+            shareBusy={shareBusy}
+            shareCopied={shareCopied}
+            onPublishShare={onPublishShare}
+            onCopyShare={onCopyShare}
+            onOpenShare={onOpenShare}
+            onUnpublishShare={onUnpublishShare}
+          />
         </div>
       </header>
 
@@ -739,19 +843,273 @@ function TripWorkspace({
   );
 }
 
+function ShareControls({
+  shareStatus,
+  shareBusy,
+  shareCopied,
+  onPublishShare,
+  onCopyShare,
+  onOpenShare,
+  onUnpublishShare,
+}) {
+  if (!shareStatus?.share_enabled) {
+    return (
+      <button className="secondary-action" type="button" onClick={onPublishShare} disabled={shareBusy}>
+        {shareBusy ? "Publishing..." : "Publish share page"}
+      </button>
+    );
+  }
+
+  return (
+    <div className="share-controls">
+      <button className="secondary-action compact" type="button" onClick={onCopyShare} disabled={shareBusy}>
+        {shareCopied ? "Copied" : "Copy link"}
+      </button>
+      <button className="secondary-action compact" type="button" onClick={onOpenShare} disabled={shareBusy}>
+        Open
+      </button>
+      <button className="secondary-action compact danger" type="button" onClick={onUnpublishShare} disabled={shareBusy}>
+        {shareBusy ? "Unpublishing..." : "Unpublish"}
+      </button>
+    </div>
+  );
+}
+
+function PublicSharePage({ shareSlug }) {
+  const [trip, setTrip] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [unavailable, setUnavailable] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPublicTrip() {
+      setLoading(true);
+      setUnavailable(false);
+
+      try {
+        const res = await fetch(`${API_URL}/public/trips/${encodeURIComponent(shareSlug)}`);
+        if (res.status === 404) {
+          if (!cancelled) setUnavailable(true);
+          return;
+        }
+        if (!res.ok) throw new Error("Request failed");
+        const data = await res.json();
+        if (!cancelled) setTrip(data);
+      } catch (err) {
+        if (!cancelled) setUnavailable(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadPublicTrip();
+    return () => {
+      cancelled = true;
+    };
+  }, [shareSlug]);
+
+  if (loading) {
+    return (
+      <section className="share-page share-centered" aria-label="Loading shared trip">
+        <BrandStamp />
+        <p className="eyebrow">Shared itinerary</p>
+        <h1>Loading trip page...</h1>
+      </section>
+    );
+  }
+
+  if (unavailable || !trip) {
+    return (
+      <section className="share-page share-centered" aria-label="Unavailable shared trip">
+        <BrandStamp />
+        <p className="eyebrow">Shared itinerary</p>
+        <h1>This trip page is unavailable.</h1>
+        <p className="hero-copy">The link may have been unpublished or may no longer exist.</p>
+      </section>
+    );
+  }
+
+  const budget = trip.budget;
+  const totalBudget = budget?.total_estimate || trip.budget_amount;
+  const totalItems = trip.itinerary_days.reduce((sum, day) => sum + day.items.length, 0);
+  const visiblePlaces = trip.places.filter((place) => place.status !== "skipped");
+  const openChecklist = trip.checklist_items.filter((item) => !item.is_completed).length;
+
+  return (
+    <section className="share-page" aria-label={`${trip.title} shared itinerary`}>
+      <header className="share-topbar">
+        <BrandStamp />
+        <span className="version-badge">Read-only share page</span>
+      </header>
+
+      <article className="share-packet">
+        <section className="share-hero">
+          <div>
+            <p className="eyebrow">{trip.destination}</p>
+            <h1>{trip.title}</h1>
+            <p className="share-meta">
+              {formatDateRange(trip)} · {trip.status} · Last updated {formatDate(trip.updated_at.slice(0, 10))}
+            </p>
+            {trip.summary && <p className="share-summary">{trip.summary}</p>}
+          </div>
+          <div className="share-metrics" aria-label="Trip summary">
+            <MetricCard label="Readiness" value={`${trip.progress}%`} detail="Planning status" />
+            <MetricCard label="Places" value={visiblePlaces.length} detail="Saved recommendations" />
+            <MetricCard label="Plan items" value={totalItems} detail="Across itinerary days" />
+            <MetricCard label="Budget" value={formatBudget(totalBudget, budget?.currency || "USD")} detail="Estimate" />
+          </div>
+        </section>
+
+        <div className="share-layout">
+          <section className="share-main">
+            <ShareSectionTitle title="Itinerary" sub={`${trip.itinerary_days.length} days planned`} />
+            <div className="share-days">
+              {trip.itinerary_days.map((day) => (
+                <article className="share-day" key={`day-${day.day_number}`}>
+                  <header>
+                    <span className="day-number">
+                      <small>Day</small>
+                      <strong>{day.day_number}</strong>
+                    </span>
+                    <div>
+                      <h2>{day.title || `Day ${day.day_number}`}</h2>
+                      <p>
+                        {formatDayDate(day.date)} · {day.summary || "Details still being shaped"}
+                      </p>
+                    </div>
+                  </header>
+                  <div className="share-timeline">
+                    {day.items.map((item, index) => (
+                      <div className="share-timeline-item" key={`${day.day_number}-${item.title}-${index}`}>
+                        <time>{formatTime(item.start_time)}</time>
+                        <span className="type-chip">{item.category || "Plan"}</span>
+                        <div>
+                          <strong>
+                            {item.title}
+                            {item.is_booked && <span> · Booked</span>}
+                          </strong>
+                          {item.description && <p>{item.description}</p>}
+                        </div>
+                      </div>
+                    ))}
+                    {!day.items.length && <p className="empty-inline">No items saved for this day yet.</p>}
+                  </div>
+                </article>
+              ))}
+              {!trip.itinerary_days.length && (
+                <div className="empty-state">
+                  <strong>No itinerary has been published yet</strong>
+                  <p>The trip exists, but it does not have saved itinerary days.</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <aside className="share-side">
+            <section className="share-side-section">
+              <ShareSectionTitle title="Places" sub={`${visiblePlaces.length} saved`} />
+              <div className="share-place-list">
+                {visiblePlaces.map((place, index) => (
+                  <div className="share-place" key={`${place.name}-${index}`}>
+                    <span>{index + 1}</span>
+                    <div>
+                      <strong>{place.name}</strong>
+                      <p>
+                        {place.category || "Place"} · {place.notes || place.city || place.country || "Saved for review"}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                {!visiblePlaces.length && <p className="empty-inline">No places saved yet.</p>}
+              </div>
+            </section>
+
+            <section className="share-side-section">
+              <ShareSectionTitle
+                title="Budget"
+                sub={totalBudget ? formatBudget(totalBudget, budget?.currency || "USD") : "Estimate pending"}
+              />
+              <div className="budget-list">
+                {(budget?.categories || []).map((category) => (
+                  <div className="budget-row" key={category.name}>
+                    <span>{category.name}</span>
+                    <strong>{formatBudget(category.amount, budget.currency)}</strong>
+                  </div>
+                ))}
+                {!budget?.categories?.length && <p className="empty-inline">No category estimate yet.</p>}
+              </div>
+              {budget?.notes?.map((note) => (
+                <p className="budget-note" key={note}>
+                  {note}
+                </p>
+              ))}
+            </section>
+
+            <section className="share-side-section">
+              <ShareSectionTitle title="Checklist" sub={`${openChecklist} open`} />
+              {trip.checklist_items.map((item, index) => (
+                <div className="share-task" key={`${item.title}-${index}`}>
+                  <span aria-hidden="true">{item.is_completed ? "✓" : ""}</span>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.due_label || formatStatus(item.priority || "medium")}</p>
+                  </div>
+                </div>
+              ))}
+              {!trip.checklist_items.length && <p className="empty-inline">No checklist items yet.</p>}
+            </section>
+
+            {!!(trip.assumptions.length || trip.warnings.length) && (
+              <section className="share-side-section">
+                <ShareSectionTitle title="Notes" sub="Assumptions and warnings" />
+                {[...trip.assumptions, ...trip.warnings].map((note, index) => (
+                  <p className="share-note" key={`${note}-${index}`}>
+                    {note}
+                  </p>
+                ))}
+              </section>
+            )}
+          </aside>
+        </div>
+
+        <footer className="share-footer">
+          <span>Planned with Wayfinder OS</span>
+          <span>{trip.generated_at ? `Generated ${formatDate(trip.generated_at.slice(0, 10))}` : "Live trip artifact"}</span>
+        </footer>
+      </article>
+    </section>
+  );
+}
+
+function BrandStamp() {
+  return (
+    <div className="brand-lockup" aria-label="Wayfinder OS">
+      <span className="brand-mark" aria-hidden="true" />
+      <div>
+        <p className="brand-name">Wayfinder</p>
+        <p className="brand-subtitle">OS</p>
+      </div>
+    </div>
+  );
+}
+
+function ShareSectionTitle({ title, sub }) {
+  return (
+    <div className="share-section-title">
+      <h2>{title}</h2>
+      <p>{sub}</p>
+    </div>
+  );
+}
+
 function AppHeader({ user }) {
   return (
     <header className="app-header">
-      <div className="brand-lockup" aria-label="Wayfinder OS">
-        <span className="brand-mark" aria-hidden="true" />
-        <div>
-          <p className="brand-name">Wayfinder</p>
-          <p className="brand-subtitle">OS</p>
-        </div>
-      </div>
+      <BrandStamp />
       <div className="header-meta">
         {user && <span className="version-badge">{user.display_name}</span>}
-        <span className="version-badge">v0.6</span>
+        <span className="version-badge">v0.7</span>
       </div>
     </header>
   );
