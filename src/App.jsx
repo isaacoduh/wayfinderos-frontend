@@ -98,6 +98,11 @@ export default function App() {
   const [buildTripStreaming, setBuildTripStreaming] = useState(false);
   const [buildTripEvents, setBuildTripEvents] = useState([]);
   const [buildTripSummary, setBuildTripSummary] = useState("");
+  const [regenerateDayStreaming, setRegenerateDayStreaming] = useState(false);
+  const [regenerateDayEvents, setRegenerateDayEvents] = useState([]);
+  const [regenerateDaySummary, setRegenerateDaySummary] = useState("");
+  const [regenerateDayTarget, setRegenerateDayTarget] = useState(null);
+  const [regenerateInstruction, setRegenerateInstruction] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -283,7 +288,7 @@ export default function App() {
   }
 
   async function runBuildTrip() {
-    if (!selectedTripId || buildTripStreaming || streaming) return;
+    if (!selectedTripId || buildTripStreaming || regenerateDayStreaming || streaming) return;
 
     setError("");
     setBuildTripStreaming(true);
@@ -348,6 +353,81 @@ export default function App() {
       setError("Build My Trip failed. Please try again.");
     } finally {
       setBuildTripStreaming(false);
+    }
+  }
+
+  async function runRegenerateDay(e) {
+    e.preventDefault();
+
+    const instruction = regenerateInstruction.trim();
+    if (!selectedTripId || !regenerateDayTarget || !instruction || regenerateDayStreaming || buildTripStreaming) return;
+
+    setError("");
+    setRegenerateDayStreaming(true);
+    setRegenerateDayEvents([]);
+    setRegenerateDaySummary("");
+    setActivePanel("activity");
+
+    let summary = "";
+
+    try {
+      const res = await fetch(`${API_URL}/trips/${selectedTripId}/agent/regenerate-day/${regenerateDayTarget.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction }),
+      });
+
+      if (!res.ok || !res.body) {
+        throw new Error("Request failed");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          const event = JSON.parse(line);
+
+          if (event.type === "agent_event") {
+            setRegenerateDayEvents((current) => [
+              ...current,
+              {
+                event: event.event,
+                payload: event.payload || {},
+              },
+            ]);
+          }
+
+          if (event.type === "delta") {
+            summary += event.text;
+            setRegenerateDaySummary(summary);
+          }
+
+          if (event.type === "error") {
+            setError(event.message || "Day regeneration failed. Please try again.");
+          }
+
+          if (event.type === "done") {
+            await loadWorkspace(selectedTripId);
+            setRegenerateDayTarget(null);
+            setRegenerateInstruction("");
+          }
+        }
+      }
+    } catch (err) {
+      setError("Day regeneration failed. Please try again.");
+    } finally {
+      setRegenerateDayStreaming(false);
     }
   }
 
@@ -423,6 +503,12 @@ export default function App() {
           buildTripStreaming={buildTripStreaming}
           buildTripEvents={buildTripEvents}
           buildTripSummary={buildTripSummary}
+          regenerateDayStreaming={regenerateDayStreaming}
+          regenerateDayEvents={regenerateDayEvents}
+          regenerateDaySummary={regenerateDaySummary}
+          regenerateDayTarget={regenerateDayTarget}
+          regenerateInstruction={regenerateInstruction}
+          setRegenerateInstruction={setRegenerateInstruction}
           activePanel={activePanel}
           setActivePanel={setActivePanel}
           messages={messages}
@@ -433,6 +519,14 @@ export default function App() {
           error={error}
           onSendMessage={sendChatMessage}
           onBuildTrip={runBuildTrip}
+          onOpenRegenerateDay={setRegenerateDayTarget}
+          onCloseRegenerateDay={() => {
+            if (!regenerateDayStreaming) {
+              setRegenerateDayTarget(null);
+              setRegenerateInstruction("");
+            }
+          }}
+          onRegenerateDay={runRegenerateDay}
           onUpdateItineraryItem={updateItineraryItem}
           onUpdateTripPlace={updateTripPlace}
           onBack={async () => {
@@ -480,7 +574,7 @@ function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip 
           <p className="eyebrow">Trip control center</p>
           <h1>Plan, shape, and track every trip in one workspace.</h1>
           <p className="hero-copy">
-            Wayfinder OS v0.2 saves shared beta trips, chat messages, itinerary state, and place decisions to Postgres.
+            Wayfinder OS v0.5 saves trips, protects locked details, and regenerates editable itinerary sections.
           </p>
         </div>
         <button className="primary-action" type="button" onClick={onCreateTrip} disabled={loading}>
@@ -571,6 +665,12 @@ function TripWorkspace({
   buildTripStreaming,
   buildTripEvents,
   buildTripSummary,
+  regenerateDayStreaming,
+  regenerateDayEvents,
+  regenerateDaySummary,
+  regenerateDayTarget,
+  regenerateInstruction,
+  setRegenerateInstruction,
   activePanel,
   setActivePanel,
   messages,
@@ -581,6 +681,9 @@ function TripWorkspace({
   error,
   onSendMessage,
   onBuildTrip,
+  onOpenRegenerateDay,
+  onCloseRegenerateDay,
+  onRegenerateDay,
   onUpdateItineraryItem,
   onUpdateTripPlace,
   onBack,
@@ -631,7 +734,16 @@ function TripWorkspace({
           buildTripStreaming={buildTripStreaming}
           buildTripEvents={buildTripEvents}
           buildTripSummary={buildTripSummary}
+          regenerateDayStreaming={regenerateDayStreaming}
+          regenerateDayEvents={regenerateDayEvents}
+          regenerateDaySummary={regenerateDaySummary}
+          regenerateDayTarget={regenerateDayTarget}
+          regenerateInstruction={regenerateInstruction}
+          setRegenerateInstruction={setRegenerateInstruction}
           onBuildTrip={onBuildTrip}
+          onOpenRegenerateDay={onOpenRegenerateDay}
+          onCloseRegenerateDay={onCloseRegenerateDay}
+          onRegenerateDay={onRegenerateDay}
           onUpdateItineraryItem={onUpdateItineraryItem}
         />
 
@@ -661,7 +773,7 @@ function AppHeader({ user }) {
       </div>
       <div className="header-meta">
         {user && <span className="version-badge">{user.display_name}</span>}
-        <span className="version-badge">v0.4</span>
+        <span className="version-badge">v0.5</span>
       </div>
     </header>
   );
@@ -713,9 +825,20 @@ function ItineraryTimeline({
   buildTripStreaming,
   buildTripEvents,
   buildTripSummary,
+  regenerateDayStreaming,
+  regenerateDayEvents,
+  regenerateDaySummary,
+  regenerateDayTarget,
+  regenerateInstruction,
+  setRegenerateInstruction,
   onBuildTrip,
+  onOpenRegenerateDay,
+  onCloseRegenerateDay,
+  onRegenerateDay,
   onUpdateItineraryItem,
 }) {
+  const workflowBusy = buildTripStreaming || regenerateDayStreaming || loading;
+
   return (
     <section className="itinerary-panel">
       <div className="panel-header sticky-panel-header">
@@ -731,7 +854,7 @@ function ItineraryTimeline({
       </div>
 
       <div className="workflow-strip" aria-label="Agent workflow concepts">
-        <button className="build-trip-button" type="button" onClick={onBuildTrip} disabled={buildTripStreaming || loading}>
+        <button className="build-trip-button" type="button" onClick={onBuildTrip} disabled={workflowBusy}>
           {buildTripStreaming ? "Building trip..." : "Build My Trip"}
         </button>
         {WORKFLOWS.map((workflow) => (
@@ -742,7 +865,23 @@ function ItineraryTimeline({
       </div>
 
       {(buildTripStreaming || buildTripEvents.length > 0 || buildTripSummary) && (
-        <BuildTripProgress events={buildTripEvents} streaming={buildTripStreaming} summary={buildTripSummary} />
+        <WorkflowProgress
+          events={buildTripEvents}
+          streaming={buildTripStreaming}
+          summary={buildTripSummary}
+          activeTitle="Build My Trip is updating this workspace"
+          completeTitle="Build My Trip completed"
+        />
+      )}
+
+      {(regenerateDayStreaming || regenerateDayEvents.length > 0 || regenerateDaySummary) && (
+        <WorkflowProgress
+          events={regenerateDayEvents}
+          streaming={regenerateDayStreaming}
+          summary={regenerateDaySummary}
+          activeTitle="Wayfinder is regenerating this day"
+          completeTitle="Day regeneration completed"
+        />
       )}
 
       <div className="timeline">
@@ -759,7 +898,17 @@ function ItineraryTimeline({
                   {formatDayDate(day.date)} · {day.summary || "No summary yet"}
                 </p>
               </div>
-              <StatusPill>{day.items.length} items</StatusPill>
+              <div className="day-actions">
+                <StatusPill>{day.items.length} items</StatusPill>
+                <button
+                  className="secondary-action compact"
+                  type="button"
+                  onClick={() => onOpenRegenerateDay(day)}
+                  disabled={workflowBusy}
+                >
+                  Regenerate
+                </button>
+              </div>
             </header>
             <div className="timeline-items">
               {day.items.map((item) => (
@@ -776,18 +925,20 @@ function ItineraryTimeline({
                         type="checkbox"
                         checked={item.is_locked}
                         disabled={loading}
+                        aria-label={`${item.is_locked ? "Unlock" : "Lock"} ${item.title}`}
                         onChange={(e) => onUpdateItineraryItem(item.id, { is_locked: e.target.checked })}
                       />
-                      Locked
+                      {item.is_locked ? "Locked" : "Lock"}
                     </label>
                     <label>
                       <input
                         type="checkbox"
                         checked={item.is_booked}
                         disabled={loading}
+                        aria-label={`${item.is_booked ? "Unmark booked" : "Mark booked"} ${item.title}`}
                         onChange={(e) => onUpdateItineraryItem(item.id, { is_booked: e.target.checked })}
                       />
-                      Booked
+                      {item.is_booked ? "Booked" : "Mark booked"}
                     </label>
                   </div>
                 </div>
@@ -803,6 +954,17 @@ function ItineraryTimeline({
           </div>
         )}
       </div>
+
+      {regenerateDayTarget && (
+        <RegenerateDayDialog
+          day={regenerateDayTarget}
+          instruction={regenerateInstruction}
+          setInstruction={setRegenerateInstruction}
+          streaming={regenerateDayStreaming}
+          onClose={onCloseRegenerateDay}
+          onSubmit={onRegenerateDay}
+        />
+      )}
     </section>
   );
 }
@@ -822,11 +984,11 @@ function formatEventDetail(payload) {
     .join(" · ");
 }
 
-function BuildTripProgress({ events, streaming, summary }) {
+function WorkflowProgress({ events, streaming, summary, activeTitle, completeTitle }) {
   return (
     <div className="build-trip-progress" aria-live="polite">
       <div>
-        <strong>{streaming ? "Build My Trip is updating this workspace" : "Build My Trip completed"}</strong>
+        <strong>{streaming ? activeTitle : completeTitle}</strong>
         <p>Progress is streamed from the agent workflow and persisted as trip activity.</p>
       </div>
       <div className="build-event-list">
@@ -841,6 +1003,51 @@ function BuildTripProgress({ events, streaming, summary }) {
         ))}
       </div>
       {summary && <p className="build-summary">{summary}</p>}
+    </div>
+  );
+}
+
+function RegenerateDayDialog({ day, instruction, setInstruction, streaming, onClose, onSubmit }) {
+  const protectedCount = day.items.filter((item) => item.is_locked || item.is_booked).length;
+  const editableCount = day.items.length - protectedCount;
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="regenerate-day-title">
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">Editable regeneration</p>
+            <h2 id="regenerate-day-title">Regenerate Day {day.day_number}</h2>
+            <p>
+              {protectedCount} locked/booked preserved · {editableCount} unlocked can change
+            </p>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} disabled={streaming} aria-label="Close">
+            ×
+          </button>
+        </div>
+
+        <form className="regenerate-form" onSubmit={onSubmit}>
+          <label htmlFor="regenerate-instruction">What should Wayfinder change?</label>
+          <textarea
+            id="regenerate-instruction"
+            value={instruction}
+            onChange={(event) => setInstruction(event.target.value)}
+            placeholder="Make this day more relaxed and avoid taxis."
+            disabled={streaming}
+            autoFocus
+          />
+          <p>Locked or booked items are protected. Wayfinder will only replace unlocked items in this day.</p>
+          <div className="modal-actions">
+            <button className="secondary-action" type="button" onClick={onClose} disabled={streaming}>
+              Cancel
+            </button>
+            <button className="primary-action compact" type="submit" disabled={streaming || !instruction.trim()}>
+              {streaming ? "Regenerating..." : "Regenerate day"}
+            </button>
+          </div>
+        </form>
+      </section>
     </div>
   );
 }

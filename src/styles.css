@@ -286,6 +286,12 @@ h3,
   padding: 0 14px;
 }
 
+.secondary-action.compact {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .secondary-action,
 .icon-button {
   min-height: 36px;
@@ -825,6 +831,12 @@ textarea:focus {
   padding: 14px;
 }
 
+.day-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .day-number {
   display: inline-flex;
   width: 44px;
@@ -926,6 +938,63 @@ textarea:focus {
   width: 14px;
   height: 14px;
   accent-color: var(--primary);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgb(51 44 36 / 42%);
+  padding: 20px;
+}
+
+.modal-panel {
+  width: min(560px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding: 18px;
+}
+
+.modal-header h2 {
+  margin-top: 6px;
+  font-size: 24px;
+}
+
+.modal-header p:not(.eyebrow),
+.regenerate-form p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.regenerate-form {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+}
+
+.regenerate-form label {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .artifact-panel {
