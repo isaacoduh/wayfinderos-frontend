@@ -6,6 +6,7 @@ const BETA_USER_KEY = "wayfinder_beta_user_id";
 const WORKFLOWS = ["Optimize itinerary", "Find alternatives", "Budget audit", "Booking readiness"];
 const PLACE_STATUSES = ["suggested", "interested", "booked", "skipped"];
 const WORKFLOW_TERMINAL_STATUSES = new Set(["completed", "failed", "canceled"]);
+const WORKSPACE_MOBILE_TABS = ["chat", "itinerary", "places", "budget", "tasks", "activity"];
 
 const FALLBACK_ACTIVITIES = [
   {
@@ -113,13 +114,14 @@ function normalizeRunEvents(run) {
 export default function App() {
   const publicShareSlug = getShareSlugFromPath();
   const [user, setUser] = useState(null);
-  const [view, setView] = useState(publicShareSlug ? "share" : "access");
+  const [view, setView] = useState(publicShareSlug ? "share" : "landing");
   const [trips, setTrips] = useState([]);
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [shareStatus, setShareStatus] = useState(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [activePanel, setActivePanel] = useState("places");
+  const [mobileWorkspacePanel, setMobileWorkspacePanel] = useState("itinerary");
   const [chatInput, setChatInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [itineraryDays, setItineraryDays] = useState([]);
@@ -192,10 +194,8 @@ export default function App() {
 
         setUser(session);
         await loadTrips();
-        if (!cancelled) setView("dashboard");
       } catch (err) {
         localStorage.removeItem(BETA_USER_KEY);
-        if (!cancelled) setView("access");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -334,6 +334,7 @@ export default function App() {
     setBuildTripSummary("");
     setBuildTripStatus("queued");
     setActivePanel("activity");
+    setMobileWorkspacePanel("activity");
 
     try {
       const startedRun = await api(`/trips/${selectedTripId}/agent/build-trip`, {
@@ -382,6 +383,7 @@ export default function App() {
     setRegenerateDaySummary("");
     setRegenerateDayStatus("queued");
     setActivePanel("activity");
+    setMobileWorkspacePanel("activity");
 
     try {
       const startedRun = await api(`/trips/${selectedTripId}/agent/regenerate-day/${regenerateDayTarget.id}`, {
@@ -530,10 +532,18 @@ export default function App() {
     );
   }
 
+  if (view === "landing") {
+    return (
+      <main className="app">
+        <LandingPage onEnterBeta={() => setView("access")} />
+      </main>
+    );
+  }
+
   if (view === "access") {
     return (
       <main className="app">
-        <AccessScreen loading={loading} error={error} onContinue={continueAsBetaTester} />
+        <AccessScreen loading={loading} error={error} onContinue={continueAsBetaTester} onBack={() => setView("landing")} />
       </main>
     );
   }
@@ -569,6 +579,8 @@ export default function App() {
           setRegenerateInstruction={setRegenerateInstruction}
           activePanel={activePanel}
           setActivePanel={setActivePanel}
+          mobileWorkspacePanel={mobileWorkspacePanel}
+          setMobileWorkspacePanel={setMobileWorkspacePanel}
           messages={messages}
           chatInput={chatInput}
           setChatInput={setChatInput}
@@ -604,11 +616,151 @@ export default function App() {
   );
 }
 
-function AccessScreen({ loading, error, onContinue }) {
+function LandingPage({ onEnterBeta }) {
+  return (
+    <section className="landing-page" aria-label="Wayfinder OS public beta landing page">
+      <header className="landing-nav">
+        <BrandStamp />
+        <div className="header-meta">
+          <span className="version-badge">v0.75 beta</span>
+          <button className="secondary-action compact" type="button" onClick={onEnterBeta}>
+            Enter beta
+          </button>
+        </div>
+      </header>
+
+      <section className="landing-hero">
+        <div className="landing-hero-copy">
+          <p className="eyebrow">Travel planning workspace</p>
+          <h1>Turn messy travel planning conversations into structured trips.</h1>
+          <p className="hero-copy">
+            Wayfinder OS helps you shape trip ideas into a durable workspace with chat, itinerary days, saved places,
+            budgets, checklists, editable regeneration, and read-only share pages.
+          </p>
+          <div className="landing-actions">
+            <button className="primary-action" type="button" onClick={onEnterBeta}>
+              Enter beta workspace
+            </button>
+            <span className="version-badge">Sample share links are created after publishing a trip</span>
+          </div>
+        </div>
+
+        <div className="landing-preview" aria-label="Wayfinder OS interface preview">
+          <div className="preview-toolbar">
+            <span />
+            <span />
+            <span />
+            <strong>Tokyo in spring</strong>
+          </div>
+          <div className="preview-grid">
+            <div className="preview-chat">
+              <span>Wayfinder</span>
+              <p>Build a slower day around Meiji Jingu, Harajuku, and one booked dinner.</p>
+              <span>You</span>
+              <p>Keep the reservation locked and reduce transit.</p>
+            </div>
+            <div className="preview-itinerary">
+              <div>
+                <small>Day 2</small>
+                <strong>Meiji and Harajuku</strong>
+              </div>
+              <ul>
+                <li>
+                  <time>08:30</time>
+                  <span>Meiji Jingu morning walk</span>
+                </li>
+                <li>
+                  <time>11:00</time>
+                  <span>Nezu Museum and garden</span>
+                </li>
+                <li>
+                  <time>19:30</time>
+                  <span>Booked dinner protected</span>
+                </li>
+              </ul>
+            </div>
+            <div className="preview-artifacts">
+              <strong>Artifacts</strong>
+              <span>Places</span>
+              <span>Budget</span>
+              <span>Checklist</span>
+              <span>Share page</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-section" aria-label="Current capabilities">
+        <div className="section-heading plain">
+          <div>
+            <p className="eyebrow">Current capabilities</p>
+            <h2>What works in this beta</h2>
+          </div>
+        </div>
+        <div className="landing-card-grid">
+          {[
+            ["Trip workspace", "Open durable trips with itinerary, places, budget, checklist, and activity panels."],
+            ["Trip-aware AI chat", "Ask for changes using the saved trip context and prior messages."],
+            ["Build My Trip", "Generate structured planning artifacts from the current workspace state."],
+            ["Editable regeneration", "Regenerate itinerary days while preserving locked or booked items."],
+            ["Persistent trips", "Trips, messages, places, checklist items, and workflow events survive refreshes."],
+            ["Share pages", "Publish read-only itinerary pages for travelers to review."],
+          ].map(([title, detail]) => (
+            <article className="landing-card" key={title}>
+              <h3>{title}</h3>
+              <p>{detail}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="landing-band" aria-label="How Wayfinder OS works">
+        <div>
+          <p className="eyebrow">How it works</p>
+          <h2>Enter the beta workspace, open a trip, then shape it through chat and structured controls.</h2>
+        </div>
+        <div className="step-list">
+          <div>
+            <strong>1</strong>
+            <p>Start from the shared beta dashboard.</p>
+          </div>
+          <div>
+            <strong>2</strong>
+            <p>Use chat, Build My Trip, and regeneration to refine the plan.</p>
+          </div>
+          <div>
+            <strong>3</strong>
+            <p>Publish a read-only share page when the itinerary is ready to review.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-section beta-limitations" aria-label="Beta limitations">
+        <div>
+          <p className="eyebrow">Beta limitations</p>
+          <h2>Honest status</h2>
+        </div>
+        <ul>
+          <li>The beta workspace currently uses shared beta access, not private user accounts.</li>
+          <li>Generated plans should be reviewed before booking travel.</li>
+          <li>Mobile usability is improving in this release.</li>
+          <li>Billing, credits, payments, and real travel bookings are not live.</li>
+        </ul>
+      </section>
+
+      <footer className="landing-footer">
+        <BrandStamp />
+        <span>Wayfinder OS v0.75 beta</span>
+      </footer>
+    </section>
+  );
+}
+
+function AccessScreen({ loading, error, onContinue, onBack }) {
   return (
     <section className="access-screen" aria-label="Wayfinder OS beta access">
       <div className="access-card">
-        <AppHeader />
+        <AppHeader version="v0.75 beta" />
         <p className="eyebrow">Shared beta workspace</p>
         <h1>Continue into durable trip state.</h1>
         <p className="hero-copy">
@@ -618,6 +770,9 @@ function AccessScreen({ loading, error, onContinue }) {
         {error && <p className="error">{error}</p>}
         <button className="primary-action" type="button" onClick={onContinue} disabled={loading}>
           {loading ? "Opening workspace..." : "Continue as beta tester"}
+        </button>
+        <button className="secondary-action access-back" type="button" onClick={onBack} disabled={loading}>
+          Back to landing page
         </button>
       </div>
     </section>
@@ -639,7 +794,7 @@ function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip 
           <p className="eyebrow">Trip control center</p>
           <h1>Plan, shape, and track every trip in one workspace.</h1>
           <p className="hero-copy">
-            Wayfinder OS v0.7 turns durable trip state into polished read-only share pages.
+            Wayfinder OS v0.75 adds a public beta landing page and responsive trip workspace.
           </p>
         </div>
         <button className="primary-action" type="button" onClick={onCreateTrip} disabled={loading}>
@@ -740,6 +895,8 @@ function TripWorkspace({
   setRegenerateInstruction,
   activePanel,
   setActivePanel,
+  mobileWorkspacePanel,
+  setMobileWorkspacePanel,
   messages,
   chatInput,
   setChatInput,
@@ -763,6 +920,13 @@ function TripWorkspace({
   onBack,
 }) {
   if (!trip) return null;
+
+  function selectMobilePanel(panel) {
+    setMobileWorkspacePanel(panel);
+    if (["places", "budget", "tasks", "activity"].includes(panel)) {
+      setActivePanel(panel);
+    }
+  }
 
   return (
     <section className="workspace-view" aria-label={`${trip.title} workspace`}>
@@ -797,47 +961,69 @@ function TripWorkspace({
 
       {error && <p className="error workspace-error">{error}</p>}
 
+      <nav className="workspace-mobile-tabs" aria-label="Workspace panels">
+        {WORKSPACE_MOBILE_TABS.map((tab) => (
+          <button
+            className={mobileWorkspacePanel === tab ? "active" : ""}
+            type="button"
+            key={tab}
+            onClick={() => selectMobilePanel(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </nav>
+
       <div className="workspace-grid">
-        <ChatPanel
-          messages={messages}
-          chatInput={chatInput}
-          setChatInput={setChatInput}
-          streaming={streaming}
-          error=""
-          onSendMessage={onSendMessage}
-        />
+        <div className={`workspace-panel-slot ${mobileWorkspacePanel === "chat" ? "mobile-active" : ""}`}>
+          <ChatPanel
+            messages={messages}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            streaming={streaming}
+            error=""
+            onSendMessage={onSendMessage}
+          />
+        </div>
 
-        <ItineraryTimeline
-          trip={trip}
-          itineraryDays={itineraryDays}
-          loading={loading}
-          buildTripStreaming={buildTripStreaming}
-          buildTripEvents={buildTripEvents}
-          buildTripSummary={buildTripSummary}
-          buildTripStatus={buildTripStatus}
-          regenerateDayStreaming={regenerateDayStreaming}
-          regenerateDayEvents={regenerateDayEvents}
-          regenerateDaySummary={regenerateDaySummary}
-          regenerateDayStatus={regenerateDayStatus}
-          regenerateDayTarget={regenerateDayTarget}
-          regenerateInstruction={regenerateInstruction}
-          setRegenerateInstruction={setRegenerateInstruction}
-          onBuildTrip={onBuildTrip}
-          onOpenRegenerateDay={onOpenRegenerateDay}
-          onCloseRegenerateDay={onCloseRegenerateDay}
-          onRegenerateDay={onRegenerateDay}
-          onUpdateItineraryItem={onUpdateItineraryItem}
-        />
+        <div className={`workspace-panel-slot ${mobileWorkspacePanel === "itinerary" ? "mobile-active" : ""}`}>
+          <ItineraryTimeline
+            trip={trip}
+            itineraryDays={itineraryDays}
+            loading={loading}
+            buildTripStreaming={buildTripStreaming}
+            buildTripEvents={buildTripEvents}
+            buildTripSummary={buildTripSummary}
+            buildTripStatus={buildTripStatus}
+            regenerateDayStreaming={regenerateDayStreaming}
+            regenerateDayEvents={regenerateDayEvents}
+            regenerateDaySummary={regenerateDaySummary}
+            regenerateDayStatus={regenerateDayStatus}
+            regenerateDayTarget={regenerateDayTarget}
+            regenerateInstruction={regenerateInstruction}
+            setRegenerateInstruction={setRegenerateInstruction}
+            onBuildTrip={onBuildTrip}
+            onOpenRegenerateDay={onOpenRegenerateDay}
+            onCloseRegenerateDay={onCloseRegenerateDay}
+            onRegenerateDay={onRegenerateDay}
+            onUpdateItineraryItem={onUpdateItineraryItem}
+          />
+        </div>
 
-        <ArtifactPanel
-          activePanel={activePanel}
-          setActivePanel={setActivePanel}
-          trip={trip}
-          tripPlaces={tripPlaces}
-          checklistItems={checklistItems}
-          agentEvents={agentEvents}
-          onUpdateTripPlace={onUpdateTripPlace}
-        />
+        <div className={`workspace-panel-slot ${["places", "budget", "tasks", "activity"].includes(mobileWorkspacePanel) ? "mobile-active" : ""}`}>
+          <ArtifactPanel
+            activePanel={activePanel}
+            setActivePanel={(panel) => {
+              setActivePanel(panel);
+              setMobileWorkspacePanel(panel);
+            }}
+            trip={trip}
+            tripPlaces={tripPlaces}
+            checklistItems={checklistItems}
+            agentEvents={agentEvents}
+            onUpdateTripPlace={onUpdateTripPlace}
+          />
+        </div>
       </div>
     </section>
   );
@@ -1103,13 +1289,13 @@ function ShareSectionTitle({ title, sub }) {
   );
 }
 
-function AppHeader({ user }) {
+function AppHeader({ user, version = "v0.75 beta" }) {
   return (
     <header className="app-header">
       <BrandStamp />
       <div className="header-meta">
         {user && <span className="version-badge">{user.display_name}</span>}
-        <span className="version-badge">v0.7</span>
+        <span className="version-badge">{version}</span>
       </div>
     </header>
   );
