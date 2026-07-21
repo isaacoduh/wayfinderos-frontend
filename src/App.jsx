@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { SignInButton, SignUpButton, UserButton, useAuth, useUser } from "@clerk/clerk-react";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
-const BETA_USER_KEY = "wayfinder_beta_user_id";
 
 const WORKFLOWS = ["Optimize itinerary", "Find alternatives", "Budget audit", "Booking readiness"];
 const PLACE_STATUSES = ["suggested", "interested", "booked", "skipped"];
@@ -29,11 +29,13 @@ const FALLBACK_ACTIVITIES = [
   },
 ];
 
-async function api(path, options = {}) {
+async function api(path, options = {}, getToken) {
+  const token = getToken ? await getToken() : null;
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -112,8 +114,17 @@ function normalizeRunEvents(run) {
 }
 
 export default function App() {
+  const { getToken, isLoaded, isSignedIn, signOut } = useAuth();
+  const { user: clerkUser } = useUser();
   const publicShareSlug = getShareSlugFromPath();
-  const [user, setUser] = useState(null);
+  const currentUser = useMemo(() => {
+    if (!clerkUser) return null;
+    return {
+      display_name: clerkUser.fullName || clerkUser.primaryEmailAddress?.emailAddress || "Wayfinder user",
+      email: clerkUser.primaryEmailAddress?.emailAddress || "",
+      avatar_url: clerkUser.imageUrl || null,
+    };
+  }, [clerkUser]);
   const [view, setView] = useState(publicShareSlug ? "share" : "landing");
   const [trips, setTrips] = useState([]);
   const [selectedTrip, setSelectedTrip] = useState(null);
@@ -144,15 +155,48 @@ export default function App() {
 
   const selectedTripId = selectedTrip?.id;
 
+  const clearPrivateState = useCallback(() => {
+    setTrips([]);
+    setSelectedTrip(null);
+    setShareStatus(null);
+    setShareCopied(false);
+    setActivePanel("places");
+    setMobileWorkspacePanel("itinerary");
+    setChatInput("");
+    setMessages([]);
+    setItineraryDays([]);
+    setTripPlaces([]);
+    setChecklistItems([]);
+    setAgentEvents([]);
+    setStreaming(false);
+    setBuildTripStreaming(false);
+    setBuildTripEvents([]);
+    setBuildTripSummary("");
+    setBuildTripStatus("");
+    setRegenerateDayStreaming(false);
+    setRegenerateDayEvents([]);
+    setRegenerateDaySummary("");
+    setRegenerateDayStatus("");
+    setRegenerateDayTarget(null);
+    setRegenerateInstruction("");
+    setError("");
+  }, []);
+
+  const handleSignOut = useCallback(async () => {
+    clearPrivateState();
+    setView("landing");
+    await signOut();
+  }, [clearPrivateState, signOut]);
+
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0 });
   }, [view, selectedTripId]);
 
   const loadTrips = useCallback(async () => {
-    const data = await api("/trips");
+    const data = await api("/trips", {}, getToken);
     setTrips(data);
     return data;
-  }, []);
+  }, [getToken]);
 
   const loadWorkspace = useCallback(async (tripId) => {
     setLoading(true);
@@ -160,13 +204,13 @@ export default function App() {
 
     try {
       const [trip, savedMessages, itinerary, places, checklist, events, share] = await Promise.all([
-        api(`/trips/${tripId}`),
-        api(`/trips/${tripId}/messages`),
-        api(`/trips/${tripId}/itinerary`),
-        api(`/trips/${tripId}/places`),
-        api(`/trips/${tripId}/checklist`),
-        api(`/trips/${tripId}/agent-events`),
-        api(`/trips/${tripId}/share`),
+        api(`/trips/${tripId}`, {}, getToken),
+        api(`/trips/${tripId}/messages`, {}, getToken),
+        api(`/trips/${tripId}/itinerary`, {}, getToken),
+        api(`/trips/${tripId}/places`, {}, getToken),
+        api(`/trips/${tripId}/checklist`, {}, getToken),
+        api(`/trips/${tripId}/agent-events`, {}, getToken),
+        api(`/trips/${tripId}/share`, {}, getToken),
       ]);
 
       setSelectedTrip(trip);
@@ -183,23 +227,30 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getToken]);
 
   useEffect(() => {
     if (publicShareSlug) return;
-    if (!localStorage.getItem(BETA_USER_KEY)) return;
+    if (!isLoaded) return;
 
     let cancelled = false;
+
+    if (!isSignedIn) {
+      clearPrivateState();
+      setView("landing");
+      return () => {
+        cancelled = true;
+      };
+    }
+
     async function restoreSession() {
       setLoading(true);
+      setError("");
       try {
-        const session = await api("/dev/session");
-        if (cancelled) return;
-
-        setUser(session);
         await loadTrips();
+        if (!cancelled) setView("dashboard");
       } catch (err) {
-        localStorage.removeItem(BETA_USER_KEY);
+        if (!cancelled) setError("Could not load your private workspace.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -209,24 +260,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [loadTrips, publicShareSlug]);
-
-  async function continueAsBetaTester() {
-    setLoading(true);
-    setError("");
-
-    try {
-      const betaUser = await api("/dev/login", { method: "POST" });
-      localStorage.setItem(BETA_USER_KEY, betaUser.id);
-      setUser(betaUser);
-      await loadTrips();
-      setView("dashboard");
-    } catch (err) {
-      setError("Could not enter the shared beta workspace.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [clearPrivateState, isLoaded, isSignedIn, loadTrips, publicShareSlug]);
 
   async function createTrip() {
     setLoading(true);
@@ -241,7 +275,7 @@ export default function App() {
           status: "Draft",
           progress: 0,
         }),
-      });
+      }, getToken);
       await loadTrips();
       await loadWorkspace(trip.id);
     } catch (err) {
@@ -272,7 +306,10 @@ export default function App() {
     try {
       const res = await fetch(`${API_URL}/trips/${selectedTripId}/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${await getToken()}`,
+        },
         body: JSON.stringify({ message: text }),
       });
 
@@ -312,14 +349,14 @@ export default function App() {
           }
 
           if (event.type === "done") {
-            const savedMessages = await api(`/trips/${selectedTripId}/messages`);
+            const savedMessages = await api(`/trips/${selectedTripId}/messages`, {}, getToken);
             setMessages(savedMessages.map((message) => ({ ...message, text: message.content })));
           }
         }
       }
 
       if (streamFailed) {
-        const savedMessages = await api(`/trips/${selectedTripId}/messages`);
+        const savedMessages = await api(`/trips/${selectedTripId}/messages`, {}, getToken);
         setMessages(savedMessages.map((message) => ({ ...message, text: message.content })));
       }
     } catch (err) {
@@ -344,16 +381,16 @@ export default function App() {
       const startedRun = await api(`/trips/${selectedTripId}/agent/build-trip`, {
         method: "POST",
         headers: { "Idempotency-Key": createIdempotencyKey("build-trip") },
-      });
+      }, getToken);
 
-      let run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`);
+      let run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`, {}, getToken);
       setBuildTripStatus(run.status);
       setBuildTripEvents(normalizeRunEvents(run));
       setBuildTripSummary(run.output_summary || "");
 
       while (!WORKFLOW_TERMINAL_STATUSES.has(run.status)) {
         await sleep(1000);
-        run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`);
+        run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`, {}, getToken);
         setBuildTripStatus(run.status);
         setBuildTripEvents(normalizeRunEvents(run));
         setBuildTripSummary(run.output_summary || "");
@@ -394,16 +431,16 @@ export default function App() {
         method: "POST",
         headers: { "Idempotency-Key": createIdempotencyKey("regenerate-day") },
         body: JSON.stringify({ instruction }),
-      });
+      }, getToken);
 
-      let run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`);
+      let run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`, {}, getToken);
       setRegenerateDayStatus(run.status);
       setRegenerateDayEvents(normalizeRunEvents(run));
       setRegenerateDaySummary(run.output_summary || "");
 
       while (!WORKFLOW_TERMINAL_STATUSES.has(run.status)) {
         await sleep(1000);
-        run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`);
+        run = await api(`/trips/${selectedTripId}/agent-runs/${startedRun.agent_run_id}`, {}, getToken);
         setRegenerateDayStatus(run.status);
         setRegenerateDayEvents(normalizeRunEvents(run));
         setRegenerateDaySummary(run.output_summary || "");
@@ -440,7 +477,7 @@ export default function App() {
       const updated = await api(`/itinerary-items/${itemId}`, {
         method: "PATCH",
         body: JSON.stringify(patch),
-      });
+      }, getToken);
 
       setItineraryDays((days) =>
         days.map((day) => ({
@@ -462,7 +499,7 @@ export default function App() {
       const updated = await api(`/trip-places/${tripPlaceId}`, {
         method: "PATCH",
         body: JSON.stringify(patch),
-      });
+      }, getToken);
       setTripPlaces((places) => places.map((place) => (place.id === tripPlaceId ? updated : place)));
     } catch (err) {
       setTripPlaces(previous);
@@ -478,9 +515,9 @@ export default function App() {
     setError("");
 
     try {
-      const status = await api(`/trips/${selectedTripId}/share`, { method: "POST" });
+      const status = await api(`/trips/${selectedTripId}/share`, { method: "POST" }, getToken);
       setShareStatus(status);
-      const [trip, tripsData] = await Promise.all([api(`/trips/${selectedTripId}`), loadTrips()]);
+      const [trip, tripsData] = await Promise.all([api(`/trips/${selectedTripId}`, {}, getToken), loadTrips()]);
       setSelectedTrip(trip);
       setTrips(tripsData);
     } catch (err) {
@@ -498,9 +535,9 @@ export default function App() {
     setError("");
 
     try {
-      const status = await api(`/trips/${selectedTripId}/share`, { method: "DELETE" });
+      const status = await api(`/trips/${selectedTripId}/share`, { method: "DELETE" }, getToken);
       setShareStatus(status);
-      const [trip, tripsData] = await Promise.all([api(`/trips/${selectedTripId}`), loadTrips()]);
+      const [trip, tripsData] = await Promise.all([api(`/trips/${selectedTripId}`, {}, getToken), loadTrips()]);
       setSelectedTrip(trip);
       setTrips(tripsData);
     } catch (err) {
@@ -539,7 +576,23 @@ export default function App() {
   if (view === "landing") {
     return (
       <main className="app">
-        <LandingPage onEnterBeta={() => setView("access")} />
+        <LandingPage
+          isLoaded={isLoaded}
+          isSignedIn={isSignedIn}
+          onEnterApp={async () => {
+            setLoading(true);
+            setError("");
+            try {
+              await loadTrips();
+              setView("dashboard");
+            } catch (err) {
+              setError("Could not load your private workspace.");
+              setView("access");
+            } finally {
+              setLoading(false);
+            }
+          }}
+        />
       </main>
     );
   }
@@ -547,7 +600,7 @@ export default function App() {
   if (view === "access") {
     return (
       <main className="app">
-        <AccessScreen loading={loading} error={error} onContinue={continueAsBetaTester} onBack={() => setView("landing")} />
+        <AccessScreen loading={loading} error={error} onBack={() => setView("landing")} />
       </main>
     );
   }
@@ -557,11 +610,12 @@ export default function App() {
       {view === "dashboard" ? (
         <TripsDashboard
           trips={trips}
-          user={user}
+          user={currentUser}
           loading={loading}
           error={error}
           onCreateTrip={createTrip}
           onOpenTrip={loadWorkspace}
+          onSignOut={handleSignOut}
         />
       ) : (
         <TripWorkspace
@@ -610,6 +664,7 @@ export default function App() {
           onRegenerateDay={runRegenerateDay}
           onUpdateItineraryItem={updateItineraryItem}
           onUpdateTripPlace={updateTripPlace}
+          onSignOut={handleSignOut}
           onBack={async () => {
             await loadTrips();
             setView("dashboard");
@@ -620,16 +675,24 @@ export default function App() {
   );
 }
 
-function LandingPage({ onEnterBeta }) {
+function LandingPage({ isLoaded, isSignedIn, onEnterApp }) {
   return (
-    <section className="landing-page" aria-label="Wayfinder OS public beta landing page">
+    <section className="landing-page" aria-label="Wayfinder OS public landing page">
       <header className="landing-nav">
         <BrandStamp />
         <div className="header-meta">
-          <span className="version-badge">v0.75 beta</span>
-          <button className="secondary-action compact" type="button" onClick={onEnterBeta}>
-            Enter
-          </button>
+          <span className="version-badge">v0.8</span>
+          {isLoaded && isSignedIn ? (
+            <button className="secondary-action compact" type="button" onClick={onEnterApp}>
+              Enter app
+            </button>
+          ) : (
+            <SignInButton mode="modal">
+              <button className="secondary-action compact" type="button">
+                Sign in
+              </button>
+            </SignInButton>
+          )}
         </div>
       </header>
 
@@ -642,9 +705,24 @@ function LandingPage({ onEnterBeta }) {
             budgets, checklists, editable regeneration, and read-only share pages.
           </p>
           <div className="landing-actions">
-            <button className="primary-action" type="button" onClick={onEnterBeta}>
-              Enter beta workspace
-            </button>
+            {isLoaded && isSignedIn ? (
+              <button className="primary-action" type="button" onClick={onEnterApp}>
+                Enter app
+              </button>
+            ) : (
+              <>
+                <SignUpButton mode="modal">
+                  <button className="primary-action" type="button">
+                    Create account
+                  </button>
+                </SignUpButton>
+                <SignInButton mode="modal">
+                  <button className="secondary-action" type="button">
+                    Sign in
+                  </button>
+                </SignInButton>
+              </>
+            )}
           </div>
         </div>
 
@@ -708,6 +786,7 @@ function LandingPage({ onEnterBeta }) {
             ["Editable regeneration", "Regenerate itinerary days while preserving locked or booked items."],
             ["Persistent trips", "Trips, messages, places, checklist items, and workflow events survive refreshes."],
             ["Share pages", "Publish read-only itinerary pages for travelers to review."],
+            ["Private accounts", "Each signed-in user sees only trips owned by their account."],
           ].map(([title, detail]) => (
             <article className="landing-card" key={title}>
               <h3>{title}</h3>
@@ -720,12 +799,12 @@ function LandingPage({ onEnterBeta }) {
       <section className="landing-band" aria-label="How Wayfinder OS works">
         <div>
           <p className="eyebrow">How it works</p>
-          <h2>Enter the beta workspace, open a trip, then shape it through chat and structured controls.</h2>
+          <h2>Sign in, open a private trip, then shape it through chat and structured controls.</h2>
         </div>
         <div className="step-list">
           <div>
             <strong>1</strong>
-            <p>Start from the shared beta dashboard.</p>
+            <p>Start from your private dashboard.</p>
           </div>
           <div>
             <strong>2</strong>
@@ -744,36 +823,35 @@ function LandingPage({ onEnterBeta }) {
           <h2>Honest status</h2>
         </div>
         <ul>
-          <li>The beta workspace currently uses shared beta access, not private user accounts.</li>
+          <li>Private trip ownership is enforced by the backend.</li>
           <li>Generated plans should be reviewed before booking travel.</li>
-          <li>Mobile usability is improving in this release.</li>
+          <li>Public share links are read-only and do not expose private chat.</li>
           <li>Billing, credits, payments, and real travel bookings are not live.</li>
         </ul>
       </section>
 
       <footer className="landing-footer">
         <BrandStamp />
-        <span>Wayfinder OS v0.75 beta</span>
+        <span>Wayfinder OS v0.8</span>
       </footer>
     </section>
   );
 }
 
-function AccessScreen({ loading, error, onContinue, onBack }) {
+function AccessScreen({ loading, error, onBack }) {
   return (
-    <section className="access-screen" aria-label="Wayfinder OS beta access">
+    <section className="access-screen" aria-label="Wayfinder OS account access">
       <div className="access-card">
-        <AppHeader version="v0.75 beta" />
-        <p className="eyebrow">Shared beta workspace</p>
-        <h1>Continue into durable trip state.</h1>
-        <p className="hero-copy">
-          This beta uses one shared tester account. Trips, chat messages, itinerary changes, and place statuses are saved
-          to the same workspace for everyone using this build.
-        </p>
+        <AppHeader version="v0.8" />
+        <p className="eyebrow">Account required</p>
+        <h1>Sign in to open your private trip workspace.</h1>
+        <p className="hero-copy">Wayfinder OS uses real accounts for private trips and backend-enforced ownership.</p>
         {error && <p className="error">{error}</p>}
-        <button className="primary-action" type="button" onClick={onContinue} disabled={loading}>
-          {loading ? "Opening workspace..." : "Continue as beta tester"}
-        </button>
+        <SignInButton mode="modal">
+          <button className="primary-action" type="button" disabled={loading}>
+            Sign in
+          </button>
+        </SignInButton>
         <button className="secondary-action access-back" type="button" onClick={onBack} disabled={loading}>
           Back to landing page
         </button>
@@ -782,7 +860,7 @@ function AccessScreen({ loading, error, onContinue, onBack }) {
   );
 }
 
-function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip }) {
+function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip, onSignOut }) {
   const activeBudget = useMemo(
     () => trips.reduce((sum, trip) => sum + Number(trip.budget_amount || 0), 0),
     [trips],
@@ -790,14 +868,14 @@ function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip 
 
   return (
     <section className="dashboard" aria-label="Wayfinder OS trips dashboard">
-      <AppHeader user={user} />
+      <AppHeader user={user} onSignOut={onSignOut} />
 
       <div className="dashboard-hero">
         <div>
           <p className="eyebrow">Trip control center</p>
           <h1>Plan, shape, and track every trip in one workspace.</h1>
           <p className="hero-copy">
-            Wayfinder OS v0.75 adds a public beta landing page and responsive trip workspace.
+            Wayfinder OS v0.8 adds real accounts, private trips, and backend-enforced ownership.
           </p>
         </div>
         <button className="primary-action" type="button" onClick={onCreateTrip} disabled={loading}>
@@ -809,7 +887,7 @@ function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip 
       {error && <p className="error dashboard-error">{error}</p>}
 
       <section className="metric-grid" aria-label="Account usage summary">
-        <MetricCard label="Workspace" value="Shared beta" detail="No private accounts yet" />
+        <MetricCard label="Workspace" value="Private" detail="Authenticated account" />
         <MetricCard label="Durable trips" value={trips.length} detail="Loaded from PostgreSQL" />
         <MetricCard label="Agent runs" value="Beta" detail="Lightweight events only" />
         <MetricCard label="Active budget" value={formatBudget(activeBudget)} detail="Across saved trips" />
@@ -849,7 +927,7 @@ function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip 
                 </span>
                 <span className="trip-stats">
                   <strong>{formatBudget(trip.budget_amount)}</strong>
-                  <span>Shared beta workspace</span>
+                  <span>Private workspace</span>
                 </span>
                 <span className="trip-open-indicator">Open workspace</span>
               </button>
@@ -858,7 +936,7 @@ function TripsDashboard({ trips, user, loading, error, onCreateTrip, onOpenTrip 
             {!trips.length && (
               <div className="empty-state">
                 <strong>No trips yet</strong>
-                <p>Create the first durable trip for this shared beta workspace.</p>
+                <p>Create your first durable trip for this account.</p>
               </div>
             )}
           </div>
@@ -921,6 +999,7 @@ function TripWorkspace({
   onRegenerateDay,
   onUpdateItineraryItem,
   onUpdateTripPlace,
+  onSignOut,
   onBack,
 }) {
   if (!trip) return null;
@@ -945,12 +1024,12 @@ function TripWorkspace({
               <StatusPill>{trip.status}</StatusPill>
             </div>
             <p>
-              {formatDateRange(trip)} · {trip.destination} · saved to shared beta workspace
+              {formatDateRange(trip)} · {trip.destination} · saved to your private workspace
             </p>
           </div>
         </div>
         <div className="workspace-actions">
-          <span className="credits-pill">Shared beta</span>
+          <span className="credits-pill">Private</span>
           <ShareControls
             shareStatus={shareStatus}
             shareBusy={shareBusy}
@@ -960,6 +1039,9 @@ function TripWorkspace({
             onOpenShare={onOpenShare}
             onUnpublishShare={onUnpublishShare}
           />
+          <button className="secondary-action compact" type="button" onClick={onSignOut}>
+            Sign out
+          </button>
         </div>
       </header>
 
@@ -1293,13 +1375,21 @@ function ShareSectionTitle({ title, sub }) {
   );
 }
 
-function AppHeader({ user, version = "v0.75 beta" }) {
+function AppHeader({ user, version = "v0.8", onSignOut }) {
   return (
     <header className="app-header">
       <BrandStamp />
       <div className="header-meta">
         {user && <span className="version-badge">{user.display_name}</span>}
         <span className="version-badge">{version}</span>
+        {user && (
+          <>
+            <button className="secondary-action compact" type="button" onClick={onSignOut}>
+              Sign out
+            </button>
+            <UserButton afterSignOutUrl="/" />
+          </>
+        )}
       </div>
     </header>
   );
