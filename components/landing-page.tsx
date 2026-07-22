@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 const capabilities = [
   [
     "Trip workspace",
-    "Durable trips with itinerary, places, budget, checklist, and activity panels.",
+    "Private planning spaces with itinerary, places, tasks, and budget notes.",
   ],
   [
     "Trip-aware chat",
@@ -24,7 +24,7 @@ const capabilities = [
   ],
   [
     "Build My Trip",
-    "Generate structured planning artifacts from the current workspace state.",
+    "Generate structured planning drafts from your saved trip details.",
   ],
   [
     "Editable regeneration",
@@ -57,7 +57,7 @@ export function LandingPage() {
         </Link>
         <div className="flex items-center gap-2">
           <span className="hidden rounded-md border px-2 py-1 text-xs font-semibold text-muted-foreground sm:inline">
-            v0.9 beta
+            v1.0 beta
           </span>
           {isLoaded && isSignedIn ? (
             <Button render={<Link href="/trips" />} size="sm">
@@ -83,9 +83,9 @@ export function LandingPage() {
             Wayfinder OS
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">
-            A private trip workspace for shaping travel plans through chat,
-            structured itinerary controls, async planning workflows, and
-            read-only share pages.
+            A private beta workspace for turning trip ideas into structured
+            itineraries, saved places, prep tasks, budget notes, and read-only
+            share pages.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             {isLoaded && isSignedIn ? (
@@ -209,8 +209,8 @@ export function LandingPage() {
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 opacity-80">
               Generated plans should be reviewed before booking travel. Billing,
-              credits, payments, collaboration, and real travel bookings are not
-              part of v0.9.
+              credits, payments, collaboration, and confirmed reservations are
+              not part of this beta.
             </p>
           </div>
           <Sparkles className="hidden size-10 opacity-70 md:block" />

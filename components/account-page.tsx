@@ -37,7 +37,7 @@ function Profile() {
       <Header
         eyebrow="Account"
         title="Travel profile"
-        sub="Wayfinder OS v0.9 uses your authenticated account for private trip ownership."
+        sub="Your account keeps private trip drafts separate from public share pages."
       />
       <section className="rounded-lg border bg-card">
         <div className="flex items-center gap-4 border-b p-6">
@@ -59,7 +59,7 @@ function Profile() {
           <Info label="Authentication" value="Clerk session" />
           <Info
             label="Trip visibility"
-            value="Owner-only by backend enforcement"
+            value="Only your account can open drafts"
           />
           <Info
             label="Public sharing"
@@ -67,7 +67,7 @@ function Profile() {
           />
           <Info
             label="Beta scope"
-            value="No billing, credits, or collaboration in v0.9"
+            value="No billing, credits, collaboration, or bookings"
           />
         </div>
       </section>
@@ -81,7 +81,7 @@ function Settings() {
       <Header
         eyebrow="Workspace"
         title="Settings"
-        sub="Current v0.9 settings reflect account privacy and frontend behavior."
+        sub="Current beta settings focus on privacy, sharing, and planning drafts."
       />
       <section className="overflow-hidden rounded-lg border bg-card">
         <Setting

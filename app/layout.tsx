@@ -5,7 +5,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "Wayfinder OS", template: "%s · Wayfinder OS" },
-  description: "A durable, agentic workspace for planning trips.",
+  description:
+    "A private beta workspace for drafting, reviewing, and sharing travel plans.",
 };
 
 export const viewport: Viewport = {

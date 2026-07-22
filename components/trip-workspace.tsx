@@ -53,6 +53,7 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { AssistantMessageRenderer } from "@/components/assistant-message-renderer";
 import {
   Dialog,
   DialogContent,
@@ -72,6 +73,15 @@ const MOBILE_TABS = [
   "activity",
 ] as const;
 type MobileTab = (typeof MOBILE_TABS)[number];
+
+const MOBILE_TAB_LABELS: Record<MobileTab, string> = {
+  chat: "Chat",
+  itinerary: "Plan",
+  places: "Places",
+  budget: "Budget",
+  tasks: "Tasks",
+  activity: "History",
+};
 
 type RunState = {
   busy: boolean;
@@ -271,7 +281,7 @@ export function TripWorkspace({ tripId }: { tripId: string }) {
 
     setError("");
     setBuildRun({ ...emptyRun, busy: true, status: "queued" });
-    activateMobileTab("activity");
+    activateMobileTab("itinerary");
 
     try {
       const started = await enqueueBuildTrip(
@@ -309,7 +319,7 @@ export function TripWorkspace({ tripId }: { tripId: string }) {
 
     setError("");
     setRegenerateRun({ ...emptyRun, busy: true, status: "queued" });
-    activateMobileTab("activity");
+    activateMobileTab("itinerary");
 
     try {
       const started = await enqueueRegenerateDay(
@@ -448,7 +458,8 @@ export function TripWorkspace({ tripId }: { tripId: string }) {
               <Badge variant="secondary">{trip.status}</Badge>
             </div>
             <p className="text-xs text-muted-foreground">
-              {formatDateRange(trip)} · {trip.destination} · private workspace
+              {formatDateRange(trip)} · {trip.destination} · Private planning
+              draft
             </p>
           </div>
         </div>
@@ -479,9 +490,9 @@ export function TripWorkspace({ tripId }: { tripId: string }) {
             key={tab}
             type="button"
             onClick={() => activateMobileTab(tab)}
-            className={`min-w-0 px-1 py-3 text-[11px] font-semibold capitalize ${mobileTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+            className={`min-w-0 px-1 py-3 text-[11px] font-semibold ${mobileTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
           >
-            {tab}
+            {MOBILE_TAB_LABELS[tab]}
           </button>
         ))}
       </nav>
@@ -548,7 +559,7 @@ export function TripWorkspace({ tripId }: { tripId: string }) {
             </DialogTitle>
             <DialogDescription>
               Describe what should change. Locked and booked items remain
-              protected by the backend workflow.
+              protected while Wayfinder updates the rest of the day.
             </DialogDescription>
           </DialogHeader>
           <form className="grid gap-3" onSubmit={runRegenerateDay}>
@@ -586,16 +597,22 @@ function ChatPanel({
   streaming: boolean;
   onSubmit: (event: FormEvent) => void;
 }) {
+  const starterPrompts = [
+    "What should I review before building this trip?",
+    "Suggest a calmer version of the itinerary.",
+    "What should I book or verify first?",
+  ];
+
   return (
     <div className="flex h-[calc(100vh-8rem)] min-h-[580px] flex-col lg:h-[calc(100vh-4rem)]">
       <div className="flex items-center justify-between border-b p-4">
         <div>
-          <h2 className="text-sm font-semibold">Trip-aware assistant</h2>
+          <h2 className="text-sm font-semibold">Planning chat</h2>
           <p className="text-[11px] text-muted-foreground">
-            Uses itinerary, places, budget, and prior messages.
+            Ask questions, request changes, or sanity-check the plan.
           </p>
         </div>
-        {streaming && <Badge variant="secondary">Streaming</Badge>}
+        {streaming && <Badge variant="secondary">Writing</Badge>}
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         <div className="grid gap-4">
@@ -607,18 +624,40 @@ function ChatPanel({
               <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                 {message.role === "user" ? "You" : "Wayfinder"}
               </span>
-              <p
-                className={`max-w-[92%] rounded-md p-3 text-xs leading-relaxed ${message.role === "user" ? "bg-primary text-primary-foreground" : "bg-secondary"}`}
-              >
-                {message.content || "Preparing the first notes..."}
-              </p>
+              {message.role === "user" ? (
+                <p className="max-w-[92%] whitespace-pre-wrap rounded-md bg-primary p-3 text-sm leading-6 text-primary-foreground">
+                  {message.content}
+                </p>
+              ) : (
+                <div className="max-w-[96%] rounded-md border bg-card p-3 shadow-sm">
+                  <AssistantMessageRenderer
+                    content={message.content}
+                    streaming={streaming && index === messages.length - 1}
+                  />
+                </div>
+              )}
             </div>
           ))}
           {!messages.length && (
-            <p className="rounded-md bg-secondary p-3 text-xs leading-6 text-muted-foreground">
-              Ask Wayfinder to shape this trip, compare options, or audit the
-              itinerary against your saved context.
-            </p>
+            <div className="rounded-md border bg-card p-4">
+              <h3 className="text-sm font-semibold">Start with context</h3>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Tell Wayfinder what matters: pace, budget, dates, booked items,
+                neighborhoods, or anything you want preserved.
+              </p>
+              <div className="mt-3 grid gap-2">
+                {starterPrompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => setInput(prompt)}
+                    className="rounded-md border bg-background px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-secondary"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -642,7 +681,7 @@ function ChatPanel({
         />
         <div className="mt-2 flex justify-between gap-2">
           <p className="text-[11px] text-muted-foreground">
-            Context-aware chat persists to the backend.
+            Wayfinder creates planning drafts, not confirmed bookings.
           </p>
           <Button type="submit" size="sm" disabled={streaming || !input.trim()}>
             <Send data-icon="inline-end" />
@@ -679,8 +718,9 @@ function ItineraryPanel({
         <div>
           <h2 className="font-serif text-xl font-semibold">Itinerary</h2>
           <p className="text-xs text-muted-foreground">
-            {trip.progress}% ready · {days.length} saved days · item toggles
-            persist
+            {days.length
+              ? `${trip.progress}% ready · Review, lock, regenerate, then share`
+              : "Build a structured plan from your trip details"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -702,6 +742,12 @@ function ItineraryPanel({
       )}
 
       <div className="flex flex-col gap-4 p-3 md:p-5">
+        {!!days.length && (
+          <div className="rounded-md border bg-card p-3 text-xs leading-5 text-muted-foreground">
+            Review opening hours and prices before booking. Locked and booked
+            items are preserved during regeneration.
+          </div>
+        )}
         {days.map((day) => (
           <article
             key={day.id}
@@ -816,11 +862,12 @@ function ItineraryPanel({
         {!days.length && (
           <div className="rounded-lg border bg-card p-8 text-center">
             <h3 className="font-serif text-2xl font-semibold">
-              No itinerary yet
+              Build your first trip plan
             </h3>
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-              Use Build My Trip or chat to generate structured trip artifacts
-              from the current workspace state.
+              Wayfinder will draft an itinerary, places to review, a checklist,
+              and a budget estimate. You can edit protected items and regenerate
+              individual days afterward.
             </p>
             <Button
               className="mt-5"
@@ -866,6 +913,13 @@ function SidePanel({
   budgetNotes: string[];
   onUpdatePlace: (place: TripPlace, status: string) => void;
 }) {
+  const labels: Record<"places" | "budget" | "tasks" | "activity", string> = {
+    places: "Places",
+    budget: "Budget",
+    tasks: "Tasks",
+    activity: "History",
+  };
+
   return (
     <div className="flex h-full min-h-[580px] flex-col">
       <div className="grid grid-cols-4 gap-1 border-b p-3">
@@ -874,9 +928,9 @@ function SidePanel({
             key={tab}
             type="button"
             onClick={() => setActive(tab)}
-            className={`rounded-md px-2 py-2 text-xs font-semibold capitalize ${active === tab ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"}`}
+            className={`rounded-md px-2 py-2 text-xs font-semibold ${active === tab ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"}`}
           >
-            {tab}
+            {labels[tab]}
           </button>
         ))}
       </div>
@@ -917,8 +971,12 @@ function PlacesPanel({
     <div>
       <PanelTitle
         icon={MapPin}
-        title="Place board"
-        sub={`${places.length} saved places`}
+        title="Places"
+        sub={
+          places.length
+            ? `${places.length} saved for review`
+            : "Saved recommendations will appear here"
+        }
       />
       <div className="grid gap-3">
         {places.map((tripPlace, index) => (
@@ -956,9 +1014,10 @@ function PlacesPanel({
           </div>
         ))}
         {!places.length && (
-          <p className="rounded-md bg-secondary p-3 text-sm text-muted-foreground">
-            No saved places yet.
-          </p>
+          <EmptyPanelState
+            title="No places yet"
+            detail="Build the trip to collect restaurants, sights, neighborhoods, and transit anchors worth reviewing."
+          />
         )}
       </div>
     </div>
@@ -983,7 +1042,7 @@ function BudgetPanel({
       <PanelTitle
         icon={CircleDollarSign}
         title={formatBudget(total ?? trip.budget_amount, currency)}
-        sub="Current estimate"
+        sub="Planning estimate"
       />
       <Progress value={trip.progress} className="my-4" />
       <div className="grid gap-2">
@@ -997,9 +1056,10 @@ function BudgetPanel({
           </div>
         ))}
         {!categories.length && (
-          <p className="rounded-md bg-secondary p-3 text-sm text-muted-foreground">
-            No category estimate yet.
-          </p>
+          <EmptyPanelState
+            title="No budget estimate yet"
+            detail="Build the trip to get a first-pass estimate. Prices should be checked before booking."
+          />
         )}
       </div>
       {notes.map((note) => (
@@ -1020,7 +1080,11 @@ function ChecklistPanel({ checklist }: { checklist: ChecklistItem[] }) {
       <PanelTitle
         icon={ClipboardList}
         title="Checklist"
-        sub={`${checklist.filter((item) => !item.is_completed).length} open tasks`}
+        sub={
+          checklist.length
+            ? `${checklist.filter((item) => !item.is_completed).length} open tasks`
+            : "Trip prep tasks will appear here"
+        }
       />
       {checklist.map((item) => (
         <div key={item.id} className="flex items-start gap-3 border-b py-3">
@@ -1038,13 +1102,13 @@ function ChecklistPanel({ checklist }: { checklist: ChecklistItem[] }) {
         </div>
       ))}
       {!checklist.length && (
-        <p className="rounded-md bg-secondary p-3 text-sm text-muted-foreground">
-          No checklist items yet.
-        </p>
+        <EmptyPanelState
+          title="No tasks yet"
+          detail="After Build My Trip, Wayfinder will suggest practical prep items such as booking checks, reservations, and packing reminders."
+        />
       )}
       <p className="mt-4 text-[11px] leading-5 text-muted-foreground">
-        Checklist items are read-only in v0.9 because the backend currently
-        exposes retrieval but not checklist mutation endpoints.
+        Checklist editing is coming later. For now, use it as a review guide.
       </p>
     </div>
   );
@@ -1066,11 +1130,11 @@ function ActivityPanel({
     <div>
       <PanelTitle
         icon={Bot}
-        title="Activity"
+        title="History"
         sub={
           buildRun.busy || regenerateRun.busy
-            ? "Workflow running"
-            : "Recent agent events"
+            ? "Wayfinder is updating your plan"
+            : "Recent planning updates"
         }
       />
       <WorkflowProgress buildRun={buildRun} regenerateRun={regenerateRun} />
@@ -1078,22 +1142,19 @@ function ActivityPanel({
         {events.map((event) => (
           <div key={event.id} className="rounded-md border p-3">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium">
-                {event.title || event.event_type || "Agent event"}
-              </p>
-              <Badge variant="outline">{event.status}</Badge>
+              <p className="text-sm font-medium">{friendlyEventTitle(event)}</p>
+              <Badge variant="outline">{friendlyStatus(event.status)}</Badge>
             </div>
-            {event.detail && (
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                {event.detail}
-              </p>
-            )}
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {friendlyEventDetail(event)}
+            </p>
           </div>
         ))}
         {!events.length && (
-          <p className="rounded-md bg-secondary p-3 text-sm text-muted-foreground">
-            No workflow events yet.
-          </p>
+          <EmptyPanelState
+            title="No history yet"
+            detail="Build or regenerate the trip to see recent planning updates."
+          />
         )}
       </div>
     </div>
@@ -1107,11 +1168,15 @@ function WorkflowProgress({
   buildRun: RunState;
   regenerateRun: RunState;
 }) {
-  const active = buildRun.status
+  const active = buildRun.busy
     ? buildRun
-    : regenerateRun.status
+    : regenerateRun.busy
       ? regenerateRun
-      : null;
+      : buildRun.status
+        ? buildRun
+        : regenerateRun.status
+          ? regenerateRun
+          : null;
   if (!active) return null;
 
   const value =
@@ -1125,17 +1190,106 @@ function WorkflowProgress({
   return (
     <div className="rounded-md border bg-card p-3">
       <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-        <span className="font-semibold">Workflow status</span>
-        <Badge variant="secondary">{active.status}</Badge>
+        <span className="font-semibold">{workflowTitle(active)}</span>
+        <Badge variant="secondary">{friendlyStatus(active.status)}</Badge>
       </div>
       <Progress value={value} />
-      {active.summary && (
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          {active.summary}
-        </p>
-      )}
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+        {workflowDetail(active)}
+      </p>
     </div>
   );
+}
+
+function EmptyPanelState({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="rounded-md border bg-card p-4">
+      <h4 className="text-sm font-semibold">{title}</h4>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">{detail}</p>
+    </div>
+  );
+}
+
+function workflowTitle(run: RunState) {
+  if (run.status === "completed") return "Plan ready";
+  if (run.status === "failed") return "Needs attention";
+  if (run.status === "queued") return "Queued";
+
+  const latest = run.events.at(-1);
+  if (latest) return friendlyEventTitle(latest);
+  return "Wayfinder is working";
+}
+
+function workflowDetail(run: RunState) {
+  if (run.status === "completed") {
+    return run.summary || "Your trip plan has been saved.";
+  }
+  if (run.status === "failed") {
+    return run.summary || "Something went wrong. Please try again.";
+  }
+
+  const latest = run.events.at(-1);
+  if (latest) return friendlyEventDetail(latest);
+  return "Preparing your planning workspace.";
+}
+
+function friendlyStatus(status?: string | null) {
+  const normalized = (status || "").toLowerCase();
+  if (normalized === "completed") return "Ready";
+  if (normalized === "failed") return "Failed";
+  if (normalized === "queued") return "Queued";
+  if (normalized === "running" || normalized === "started") return "Working";
+  if (normalized === "canceled") return "Canceled";
+  return formatStatus(status || "Working");
+}
+
+function friendlyEventTitle(event: AgentEvent) {
+  const type = event.event_type || "";
+  const mapped: Record<string, string> = {
+    "agent_run.queued": "Queued",
+    "agent_run.started": "Starting your plan",
+    "trip.context_loaded": "Reading your trip details",
+    "build_trip.prompt_prepared": "Preparing your plan",
+    "build_trip.output_received": "Drafting itinerary",
+    "build_trip.persistence.started": "Saving your trip",
+    "build_trip.persistence.completed": "Saving complete",
+    "regenerate_day.prompt_prepared": "Preparing day changes",
+    "regenerate_day.output_received": "Drafting the updated day",
+    "regenerate_day.persistence.started": "Saving the updated day",
+    "regenerate_day.persistence.completed": "Day saved",
+    "agent_run.completed": "Plan ready",
+    "agent_run.failed": "Something went wrong",
+  };
+
+  return mapped[type] || event.title || "Planning update";
+}
+
+function friendlyEventDetail(event: AgentEvent) {
+  const type = event.event_type || "";
+  const mapped: Record<string, string> = {
+    "agent_run.queued": "Your request is waiting to start.",
+    "agent_run.started": "Wayfinder has started working on the trip.",
+    "trip.context_loaded":
+      "Dates, destination, itinerary, places, and saved notes are being reviewed.",
+    "build_trip.prompt_prepared":
+      "Wayfinder is turning your trip details into a planning brief.",
+    "build_trip.output_received":
+      "A structured plan has been drafted and is being checked.",
+    "build_trip.persistence.started":
+      "The itinerary, places, tasks, and budget are being saved.",
+    "build_trip.persistence.completed": "Your workspace has been updated.",
+    "regenerate_day.prompt_prepared":
+      "Locked and booked items are being protected before changes are drafted.",
+    "regenerate_day.output_received":
+      "The updated day has been drafted and is being checked.",
+    "regenerate_day.persistence.started":
+      "The revised day is being saved to your itinerary.",
+    "regenerate_day.persistence.completed": "The day has been updated.",
+    "agent_run.completed": "The latest planning update is ready to review.",
+    "agent_run.failed": "The planning run did not finish. You can try again.",
+  };
+
+  return mapped[type] || event.detail || "Wayfinder updated this trip.";
 }
 
 function ShareControls({

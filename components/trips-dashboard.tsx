@@ -3,14 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth, useUser } from "@clerk/nextjs";
-import {
-  ArrowUpRight,
-  Bot,
-  CheckCircle2,
-  Clock3,
-  MapPin,
-  Plus,
-} from "lucide-react";
+import { ArrowUpRight, CheckCircle2, Clock3, MapPin, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createTrip, loadTrips } from "@/lib/api-client";
 import { formatBudget, formatDate, formatDateRange } from "@/lib/formatters";
@@ -74,14 +67,14 @@ export function TripsDashboard() {
       <section className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-primary">
-            Trip control center
+            Private trip planning
           </p>
           <h1 className="font-serif text-3xl font-semibold tracking-tight md:text-4xl">
             Good morning, {displayName}.
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Your private trips, saved artifacts, and agent activity are loaded
-            from the Wayfinder backend.
+            Tell Wayfinder where you are going, build a structured plan, review
+            the details, and share when it is ready.
           </p>
         </div>
         <Button onClick={handleCreateTrip} disabled={creating || loading}>
@@ -98,24 +91,20 @@ export function TripsDashboard() {
 
       <section className="grid border-y sm:grid-cols-2 xl:grid-cols-4">
         <Metric
-          label="Workspace"
+          label="Privacy"
           value="Private"
-          detail="Authenticated account"
+          detail="Only you can open drafts"
         />
         <Metric
-          label="Durable trips"
+          label="Trips"
           value={String(trips.length)}
-          detail="Owned by current user"
+          detail="Saved planning workspaces"
         />
+        <Metric label="Planner" value="Ready" detail="Build and regenerate" />
         <Metric
-          label="Agent workflows"
-          value="Async"
-          detail="Redis-backed jobs"
-        />
-        <Metric
-          label="Active budget"
+          label="Budget"
           value={formatBudget(activeBudget)}
-          detail="Across saved trips"
+          detail="Across active drafts"
         />
       </section>
 
@@ -125,7 +114,8 @@ export function TripsDashboard() {
             <div>
               <h2 className="font-serif text-2xl font-semibold">Your trips</h2>
               <p className="text-sm text-muted-foreground">
-                Plans, readiness, places, and next actions from PostgreSQL.
+                Open a trip to review its itinerary, places, tasks, and share
+                page.
               </p>
             </div>
           </div>
@@ -205,11 +195,12 @@ export function TripsDashboard() {
                   <MapPin className="size-5 text-primary" />
                 </span>
                 <h3 className="font-serif text-2xl font-semibold">
-                  No trips yet
+                  Plan your first trip
                 </h3>
                 <p className="mx-auto max-w-md text-sm leading-6 text-muted-foreground">
-                  Create your first durable trip for this account. It will be
-                  private to your Clerk identity.
+                  Start with a private workspace. Wayfinder will help turn rough
+                  ideas into an itinerary, saved places, prep tasks, and a share
+                  page when you are ready.
                 </p>
                 <div>
                   <Button onClick={handleCreateTrip} disabled={creating}>
@@ -226,27 +217,27 @@ export function TripsDashboard() {
           <div className="rounded-lg border bg-card">
             <div className="border-b p-5">
               <h2 className="font-serif text-xl font-semibold">
-                Agent activity
+                How planning works
               </h2>
               <p className="text-xs text-muted-foreground">
-                Open a trip to view durable workflow events.
+                A simple loop for getting from idea to shareable plan.
               </p>
             </div>
             {[
               [
                 "Build My Trip",
-                "Creates itinerary, places, budget, checklist, and planning notes.",
+                "Drafts itinerary days, places, budget notes, and prep tasks.",
                 CheckCircle2,
               ],
               [
-                "Regenerate Day",
+                "Regenerate safely",
                 "Updates a day while preserving locked and booked items.",
                 Clock3,
               ],
               [
-                "Trip-aware chat",
-                "Streams responses using the trip workspace context.",
-                Bot,
+                "Share when ready",
+                "Publish a read-only page without exposing private chat.",
+                ArrowUpRight,
               ],
             ].map(([title, detail, Icon]) => (
               <div
@@ -266,7 +257,6 @@ export function TripsDashboard() {
             ))}
           </div>
           <div className="rounded-lg bg-primary p-6 text-primary-foreground">
-            <Bot className="mb-5 size-6" />
             <p className="text-xs font-bold uppercase tracking-[0.16em] opacity-70">
               Suggested next
             </p>
@@ -274,8 +264,8 @@ export function TripsDashboard() {
               Open a saved trip
             </h3>
             <p className="mt-2 text-sm leading-relaxed opacity-75">
-              Chat, itinerary toggles, place statuses, workflow events, and
-              share links persist across refreshes.
+              Review the itinerary first. Then mark booked items, regenerate any
+              weak day, and publish a read-only page when it looks useful.
             </p>
           </div>
         </aside>

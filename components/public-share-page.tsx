@@ -113,7 +113,7 @@ function SharedTripPacket({ trip }: { trip: PublicSharedTrip }) {
               </p>
               {trip.summary && (
                 <p className="mt-5 max-w-3xl text-sm leading-7 text-muted-foreground">
-                  {trip.summary}
+                  {cleanSharedText(trip.summary)}
                 </p>
               )}
             </div>
@@ -150,7 +150,7 @@ function SharedTripPacket({ trip }: { trip: PublicSharedTrip }) {
                     </div>
                     {day.summary && (
                       <p className="mb-3 text-sm leading-6 text-muted-foreground">
-                        {day.summary}
+                        {cleanSharedText(day.summary)}
                       </p>
                     )}
                     <div>
@@ -171,7 +171,9 @@ function SharedTripPacket({ trip }: { trip: PublicSharedTrip }) {
                             </p>
                             <p className="text-xs text-muted-foreground">
                               {item.category || "Plan"} ·{" "}
-                              {item.description || "Details pending"}
+                              {cleanSharedText(
+                                item.description || "Details pending",
+                              )}
                             </p>
                           </div>
                         </div>
@@ -206,10 +208,12 @@ function SharedTripPacket({ trip }: { trip: PublicSharedTrip }) {
                         <p className="text-sm font-medium">{place.name}</p>
                         <p className="text-xs text-muted-foreground">
                           {place.category || "Place"} ·{" "}
-                          {place.notes ||
-                            place.city ||
-                            place.country ||
-                            formatStatus(place.status)}
+                          {cleanSharedText(
+                            place.notes ||
+                              place.city ||
+                              place.country ||
+                              formatStatus(place.status),
+                          )}
                         </p>
                       </div>
                     </div>
@@ -281,7 +285,7 @@ function SharedTripPacket({ trip }: { trip: PublicSharedTrip }) {
                         key={`${note}-${index}`}
                         className="mb-2 rounded-md border bg-card p-3 text-xs leading-5 text-muted-foreground"
                       >
-                        {note}
+                        {cleanSharedText(note)}
                       </p>
                     ),
                   )}
@@ -347,4 +351,14 @@ function SideTitle({ title, sub }: { title: string; sub: string }) {
       <p className="text-xs text-muted-foreground">{sub}</p>
     </div>
   );
+}
+
+function cleanSharedText(value: string) {
+  return value
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .trim();
 }

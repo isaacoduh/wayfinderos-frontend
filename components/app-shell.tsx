@@ -7,7 +7,6 @@ import {
   Compass,
   Menu,
   Plus,
-  Search,
   Settings,
   SlidersHorizontal,
   X,
@@ -94,16 +93,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             {open ? <X /> : <Menu />}
           </Button>
-          <div className="relative hidden max-w-md flex-1 md:block">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              className="h-9 w-full rounded-md border bg-secondary/40 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Search trips, places, and notes…"
-            />
+          <div className="hidden flex-1 md:block">
+            <p className="text-sm font-medium">
+              Trusted travel planning drafts
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Review opening hours, prices, and booking details before you
+              commit.
+            </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <span className="hidden rounded-md bg-secondary px-2.5 py-1.5 text-xs font-semibold sm:inline">
-              v0.9 beta
+              v1.0 beta
             </span>
             <UserButton />
           </div>
