@@ -27,7 +27,9 @@ Wayfinder OS gives each signed-in user a private travel planning workspace. User
 
 ## Screenshots And Demo
 
-Demo link: add after deployment.
+Live demo: [wayfinderos.netlify.app](https://wayfinderos.netlify.app/)
+
+Backend API: [web-production-61b12.up.railway.app](https://web-production-61b12.up.railway.app/)
 
 The generated overview image above is a README/case-study visual. Real product screenshots should be placed in `docs/screenshots/` using these names:
 
@@ -95,6 +97,12 @@ The local app defaults to `http://localhost:3000`.
 
 The frontend expects the backend API to be running and reachable through `NEXT_PUBLIC_API_URL`.
 
+Production frontend currently points at:
+
+```bash
+NEXT_PUBLIC_API_URL=https://web-production-61b12.up.railway.app
+```
+
 For a full local demo, start:
 
 1. PostgreSQL and Redis from the workspace root.
@@ -130,6 +138,11 @@ Production deployment requires:
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` from the matching Clerk application.
 - Clerk allowed origins/routes configured for the deployed frontend domain.
 - Backend CORS configured with the deployed frontend origin.
+
+Current deployed URLs:
+
+- Frontend: `https://wayfinderos.netlify.app/`
+- Backend API: `https://web-production-61b12.up.railway.app/`
 
 Do not expose backend secret keys in frontend environment variables.
 
